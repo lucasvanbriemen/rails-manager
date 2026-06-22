@@ -188,11 +188,49 @@ class DeployRunner
 
   def verify!
     log "\n--- verify live site ---\n"
-    result = AppStatusChecker.check(@app)
-    log "status: #{result[:status]} (HTTP #{result[:code]}) — #{result[:detail]}\n"
-    unless AppStatusChecker::HEALTHY.include?(result[:status])
-      raise StepFailed, "site not healthy after deploy (#{result[:status]})"
+    result = wait_for_health
+    return if AppStatusChecker::HEALTHY.include?(result[:status])
+
+    # Most common boot failure on this server is the Passenger default-gem
+    # (stringio) conflict. Try to self-heal once, then re-verify.
+    log "not healthy (#{result[:status]}: #{result[:detail]}) — attempting stringio heal\n"
+    heal_stringio!
+    restart!
+    result = wait_for_health
+    return if AppStatusChecker::HEALTHY.include?(result[:status])
+
+    raise StepFailed, "site not healthy after deploy + heal (#{result[:status]}: #{result[:detail]})"
+  end
+
+  # Passenger cold-spawns on the first request after a restart, so poll a few
+  # times rather than failing on a single early check.
+  def wait_for_health(tries: 6, delay: 2)
+    result = nil
+    tries.times do |i|
+      result = AppStatusChecker.check(@app)
+      log "  check #{i + 1}/#{tries}: #{result[:status]} (HTTP #{result[:code]})\n"
+      return result if AppStatusChecker::HEALTHY.include?(result[:status])
+
+      sleep delay
     end
+    result
+  end
+
+  # Pin stringio to the Ruby default so Passenger's pre-activated version matches
+  # the lock, then drop any stale newer copy. Idempotent.
+  def heal_stringio!
+    default = capture("ruby", "-e", "require 'stringio'; print StringIO::VERSION").first.to_s.strip
+    default = "3.1.1" if default.empty?
+    gemfile = File.join(@app.app_path, "Gemfile")
+    if File.read(gemfile).match?(/^\s*gem ["']stringio["']/)
+      log "stringio already pinned; refreshing bundle\n"
+    else
+      File.open(gemfile, "a") { |f| f.puts %(gem "stringio", "#{default}") }
+      log "pinned stringio #{default} in Gemfile (Passenger default-gem workaround)\n"
+    end
+    run! "bundle", "config", "set", "--local", "frozen", "false"
+    run! "bundle", "install", "--jobs", "4"
+    run! "bundle", "clean", "--force"
   end
 
   # ---- ruby / rbenv --------------------------------------------------------
