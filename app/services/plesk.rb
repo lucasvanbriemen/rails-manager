@@ -25,6 +25,12 @@ module Plesk
     PrivilegedShell.run("set-docroot", subdomain, domain, relative_www_root)
   end
 
+  # Enables Passenger/Ruby for the domain and pins the version (required for a
+  # new subdomain — otherwise Apache 403s instead of handing off to the app).
+  def enable_ruby(fqdn, version)
+    PrivilegedShell.run("enable-ruby", fqdn, version)
+  end
+
   def reconfigure(fqdn)
     PrivilegedShell.run("reconfigure", fqdn)
   end

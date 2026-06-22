@@ -52,6 +52,8 @@ class DeployRunner
     plesk "create subdomain", Plesk.create_subdomain(@app.subdomain, @app.domain)
     plesk "set document root to #{@app.relative_www_root}",
           Plesk.set_docroot(@app.subdomain, @app.domain, @app.relative_www_root)
+    plesk "enable Passenger/Ruby #{@app.ruby_version}",
+          Plesk.enable_ruby(@app.fqdn, @app.ruby_version)
     plesk "reconfigure apache vhost", Plesk.reconfigure(@app.fqdn)
   end
 

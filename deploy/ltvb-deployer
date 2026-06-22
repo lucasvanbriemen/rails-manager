@@ -41,6 +41,12 @@ valid_domain() {
   return 1
 }
 
+# Ruby version like 3.3.8 — digits and dots only.
+valid_version() {
+  [[ "$1" =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 1
+  return 0
+}
+
 # Relative www-root inside the webspace, e.g. "git.ltvb.nl/public".
 # Allow letters/digits/dot/underscore/hyphen/slash only; forbid "..", absolute paths.
 valid_relpath() {
@@ -87,6 +93,18 @@ case "$verb" in
     plesk bin subdomain --update "$sub" -domain "$parent" -www-root "$relpath"
     ;;
 
+  enable-ruby)
+    # Turn on Passenger/Ruby for a (sub)domain and pin its version. Without this
+    # a freshly-created subdomain has no Passenger block and Apache 403s/serves
+    # static — the trap found while bootstrapping apps.ltvb.nl.
+    require_args 2 "$#"
+    fqdn="$1"; version="$2"
+    valid_name "$fqdn"       || die "invalid fqdn: $fqdn"
+    valid_version "$version" || die "invalid ruby version: $version"
+    plesk ext ruby --enable -domain "$fqdn" -version "$version"
+    plesk ext ruby --set-version -domain "$fqdn" -version "$version"
+    ;;
+
   reconfigure)
     require_args 1 "$#"
     fqdn="$1"
@@ -103,6 +121,6 @@ case "$verb" in
     ;;
 
   *)
-    die "unknown verb: ${verb:-<none>} (allowed: list-domains create-subdomain set-docroot reconfigure remove-subdomain)"
+    die "unknown verb: ${verb:-<none>} (allowed: list-domains create-subdomain set-docroot enable-ruby reconfigure remove-subdomain)"
     ;;
 esac

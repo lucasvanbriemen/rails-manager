@@ -17,7 +17,8 @@ dead. This tool turns that ~12-step fix into one button.
 ## The deploy recipe (what `DeployRunner` automates)
 
 1. **Provision** (new app): `create-subdomain` → `set-docroot` to `<app>/public`
-   (the gotcha — Plesk defaults to the app root) → `reconfigure` the vhost.
+   (the gotcha — Plesk defaults to the app root) → `enable-ruby` (turn on
+   Passenger + pin the version, else Apache 403s) → `reconfigure` the vhost.
 2. **Fetch code**: `git clone`/`git reset --hard` *or* unpack an uploaded tarball.
 3. **Secrets**: write `config/master.key` + `.env` (stored encrypted in this app).
 4. **Gems**: `bundle install` using the app's **rbenv** Ruby (the system Ruby
