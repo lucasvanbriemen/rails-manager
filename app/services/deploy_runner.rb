@@ -84,11 +84,18 @@ class DeployRunner
   end
 
   def unpack_upload!
-    raise StepFailed, "no upload provided" if @upload_tarball.blank? || !File.exist?(@upload_tarball)
-
-    FileUtils.mkdir_p(@app.app_path)
-    run! "tar", "xzf", @upload_tarball, "-C", @app.app_path
-    @deployment.update!(ref: "upload")
+    if @upload_tarball.present? && File.exist?(@upload_tarball)
+      FileUtils.mkdir_p(@app.app_path)
+      run! "tar", "xzf", @upload_tarball, "-C", @app.app_path
+      @deployment.update!(ref: "upload")
+    elsif File.exist?(File.join(@app.app_path, "config.ru")) || File.exist?(File.join(@app.app_path, "Gemfile"))
+      # No tarball, but code is already on disk (e.g. an imported app) — just
+      # rebuild and restart in place rather than failing.
+      log "no upload provided — rebuilding the code already on disk in place\n"
+      @deployment.update!(ref: "in-place")
+    else
+      raise StepFailed, "no upload provided and no existing code at #{@app.app_path}"
+    end
   end
 
   # Plesk seeds a new docroot with its "Domain Default page" index.html. With
