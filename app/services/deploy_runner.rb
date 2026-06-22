@@ -71,16 +71,28 @@ class DeployRunner
 
   def fetch_code!
     log "\n--- fetch code (#{@app.source_mode}) ---\n"
-    if @app.upload?
-      unpack_upload!
-    elsif Dir.exist?(File.join(@app.app_path, ".git"))
-      run! "git", "-C", @app.app_path, "fetch", "--prune", "origin"
-      run! "git", "-C", @app.app_path, "reset", "--hard", (@ref.presence || "origin/#{@app.git_branch}")
-    else
-      FileUtils.mkdir_p(@app.webspace_root)
-      run! "git", "clone", "--branch", @app.git_branch, @app.git_repo_url, @app.app_path
-    end
+    @app.upload? ? unpack_upload! : git_sync!
     record_git_ref!
+  end
+
+  # Bring the on-disk code to the target git ref. Handles three cases: an
+  # existing checkout (fetch+reset), an existing NON-git deploy (adopt in place,
+  # preserving untracked .env/master.key/vendor/storage), and a fresh dir.
+  def git_sync!
+    target = @ref.presence || "origin/#{@app.git_branch}"
+
+    if Dir.exist?(File.join(@app.app_path, ".git"))
+      run! "git", "-C", @app.app_path, "remote", "set-url", "origin", @app.git_repo_url
+    else
+      log "initializing git checkout in #{@app.app_path}\n" unless Dir.exist?(@app.app_path)
+      log "adopting existing directory as a git checkout\n" if Dir.exist?(@app.app_path)
+      FileUtils.mkdir_p(@app.app_path)
+      run! "git", "-C", @app.app_path, "init", "-q", "-b", @app.git_branch
+      run! "git", "-C", @app.app_path, "remote", "add", "origin", @app.git_repo_url
+    end
+
+    run! "git", "-C", @app.app_path, "fetch", "--prune", "origin"
+    run! "git", "-C", @app.app_path, "reset", "--hard", target
   end
 
   def unpack_upload!
