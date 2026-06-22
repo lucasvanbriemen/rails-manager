@@ -132,10 +132,14 @@ class DeployRunner
       log "no master.key stored — skipping (credentials must not be needed to boot)\n"
     end
 
-    env_path = File.join(@app.app_path, ".env")
-    File.write(env_path, @app.env_text.to_s)
-    File.chmod(0o600, env_path)
-    log "wrote .env (#{@app.env_text.to_s.lines.count} lines)\n"
+    if @app.env_text.present?
+      env_path = File.join(@app.app_path, ".env")
+      File.write(env_path, @app.env_text)
+      File.chmod(0o600, env_path)
+      log "wrote .env (#{@app.env_text.lines.count} lines)\n"
+    else
+      log "no .env stored — leaving any existing .env untouched\n"
+    end
   end
 
   def bundle_install!
@@ -160,7 +164,7 @@ class DeployRunner
 
   def precompile_assets!
     log "\n--- assets:precompile ---\n"
-    run! "bundle", "exec", "rails", "assets:precompile", extra_env: { "SECRET_KEY_BASE_DUMMY" => "1" }
+    run! "bundle", "exec", "rails", "assets:precompile"
   end
 
   def restart!
@@ -212,6 +216,11 @@ class DeployRunner
       "PATH"              => "#{@app.rbenv_root}/shims:#{@app.rbenv_root}/bin:/usr/local/bin:/usr/bin:/bin",
       "HOME"              => @app.webspace_root,
       "RAILS_ENV"         => "production",
+      # Build-phase rails tasks (db:*, assets:precompile) just need the app to
+      # boot, not a real secret. Apps that read RAILS_MASTER_KEY from Apache
+      # (e.g. login) have no key in this shell, so use a throwaway one here.
+      # The real key is only used by the serving Passenger process.
+      "SECRET_KEY_BASE_DUMMY" => "1",
       "BUNDLE_GEMFILE"    => nil,
       "BUNDLE_PATH"       => nil,
       "BUNDLE_APP_CONFIG" => nil,
