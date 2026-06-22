@@ -23,17 +23,6 @@
   </head>
 
   <body>
-    <header class="topbar">
-      <a href="<%= root_path %>" class="topbar__brand">ltvb&nbsp;apps</a>
-      <nav class="topbar__nav">
-        <%= link_to "Dashboard", root_path %>
-        <%= link_to "New app", new_app_path %>
-      </nav>
-      <% if current_account %>
-        <span class="topbar__user"><%= current_account["name"] || current_account["email"] %></span>
-      <% end %>
-    </header>
-
     <%= header(title: "Apps", items: [{name: "Dashboard", href: root_path, active: !current_page?(new_app_path) }, {name: "New app", href: new_app_path, active: current_page?(new_app_path)}]) %>
 
     <main class="container">
