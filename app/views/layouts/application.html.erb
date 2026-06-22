@@ -34,6 +34,8 @@
       <% end %>
     </header>
 
+    <%= header(title: "Apps", items: [{name: "Dashboard", href: root_path, active: !current_page?(new_app_path) }, {name: "New app", href: new_app_path, active: current_page?(new_app_path)}]) %>
+
     <main class="container">
       <% if flash[:notice] %><div class="flash flash--notice"><%= flash[:notice] %></div><% end %>
       <% if flash[:alert] %><div class="flash flash--alert"><%= flash[:alert] %></div><% end %>
