@@ -43,7 +43,7 @@
   <label><span>Notes</span><%= f.text_area :notes, rows: 2 %></label>
 
   <div class="form-actions">
-    <%= f.submit  %>
+    <%= f.submit (app.new_record? ? "Create & deploy" : "Save"), class: "btn btn--primary" %>
     <%= link_to "Cancel", (app.new_record? ? root_path : app_path(app)), class: "btn" %>
   </div>
 <% end %>
