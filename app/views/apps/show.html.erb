@@ -1,0 +1,54 @@
+<% content_for :title, @app.fqdn %>
+
+<div class="page-head">
+  <div>
+    <h1><%= @app.name %></h1>
+    <div class="muted"><a href="<%= @app.url %>" target="_blank" rel="noopener"><%= @app.fqdn %></a> · <%= status_badge(@status) %></div>
+  </div>
+  <div class="head-actions">
+    <%= button_to "Deploy", deploy_app_path(@app), class: "btn btn--primary" %>
+    <%= button_to "Restart", restart_app_path(@app), class: "btn" %>
+    <%= link_to "Logs", logs_app_path(@app), class: "btn" %>
+    <%= link_to "Edit", edit_app_path(@app), class: "btn" %>
+  </div>
+</div>
+
+<div class="cols">
+  <section class="card">
+    <h2>Configuration</h2>
+    <dl class="kv">
+      <dt>Path</dt><dd class="mono"><%= @app.app_path %></dd>
+      <dt>Document root</dt><dd class="mono"><%= @app.public_path %></dd>
+      <dt>Ruby</dt><dd><code><%= @app.ruby_version %></code></dd>
+      <dt>Source</dt><dd><%= @app.source_mode %><% if @app.git? %> — <%= @app.git_repo_url %> (<%= @app.git_branch %>)<% end %></dd>
+      <dt>Primary DB</dt><dd><%= @app.primary_db_kind %></dd>
+      <dt>master.key</dt><dd><%= @app.master_key.present? ? "set" : "—" %></dd>
+      <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
+    </dl>
+    <% if @app.external_primary? %>
+      <%= button_to "Migrate primary DB", migrate_primary_app_path(@app), class: "btn btn--warn",
+            form: { data: { turbo_confirm: "Run migrations against the EXTERNAL/shared primary DB for #{@app.fqdn}?" } } %>
+    <% end %>
+    <%= button_to "Delete app", app_path(@app), method: :delete, class: "btn btn--danger",
+          form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } } %>
+  </section>
+
+  <section class="card">
+    <h2>Recent deployments</h2>
+    <% if @deployments.empty? %>
+      <p class="muted">No deployments yet.</p>
+    <% else %>
+      <ul class="deploys">
+        <% @deployments.each do |d| %>
+          <li>
+            <%= link_to app_deployment_path(@app, d) do %>
+              <%= deployment_badge(d) %>
+              <strong><%= d.kind %></strong>
+              <span class="muted"><%= d.ref.to_s.first(10) %> · <%= time_ago_in_words(d.created_at) %> ago<%= " · #{d.duration}s" if d.duration %></span>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
+    <% end %>
+  </section>
+</div>

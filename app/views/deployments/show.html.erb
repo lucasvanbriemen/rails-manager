@@ -1,0 +1,19 @@
+<% content_for :title, "#{@deployment.kind} · #{@app.fqdn}" %>
+
+<div class="page-head">
+  <div>
+    <h1><%= @deployment.kind %> · <%= @app.fqdn %></h1>
+    <div class="muted">
+      <span data-deploy-log-target="status" class="badge badge--dep-<%= @deployment.status %>"><%= @deployment.status %></span>
+      <% if @deployment.ref.present? %>· <code><%= @deployment.ref.first(12) %></code><% end %>
+      <% if @deployment.triggered_by %>· by <%= @deployment.triggered_by %><% end %>
+    </div>
+  </div>
+  <%= link_to "← App", app_path(@app), class: "btn" %>
+</div>
+
+<div data-controller="deploy-log"
+     data-deploy-log-url-value="<%= app_deployment_path(@app, @deployment, format: :json) %>"
+     data-deploy-log-finished-value="<%= @deployment.finished? %>">
+  <pre class="logbox logbox--tall" data-deploy-log-target="log"><%= @deployment.log %></pre>
+</div>

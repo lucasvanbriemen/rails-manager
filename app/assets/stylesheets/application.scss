@@ -1,0 +1,8 @@
+// Entrypoint → app/assets/builds/application.css, auto-included by
+// `stylesheet_link_tag :app` in the layout.
+//
+// The "tree" is auto-discovered: config/application.rb globs every .scss
+// under this folder and (re)generates _manifest.scss with a @use per file.
+// Add a file anywhere in the tree → it's picked up on the next boot, no edits.
+// (Sass has no glob import, hence the generated manifest.)
+@use "manifest";

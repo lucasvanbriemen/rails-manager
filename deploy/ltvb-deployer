@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+#
+# ltvb-deployer — the ONLY root-privileged surface of the apps.ltvb.nl manager.
+#
+# The manager web app runs as the unprivileged `ltvb` user and cannot sudo
+# arbitrary commands. It may run ONLY this script (see /etc/sudoers.d/ltvb-deployer),
+# which exposes a fixed set of verbs for the Plesk operations that require root.
+# Every argument is validated here before any real command runs, and commands are
+# invoked with an argv array (never a shell string), so this file is the trust
+# boundary. Keep it small and paranoid.
+#
+# Install (as root):
+#   install -o root -g root -m 0755 deploy/ltvb-deployer /usr/local/sbin/ltvb-deployer
+#   install -o root -g root -m 0440 deploy/ltvb-deployer.sudoers /etc/sudoers.d/ltvb-deployer
+#   visudo -cf /etc/sudoers.d/ltvb-deployer   # verify
+#
+set -euo pipefail
+
+# Domains under which the manager may create/modify subdomains. Edit as root.
+ALLOWED_DOMAINS=(
+  "ltvb.nl"
+  "lucasvanbriemen.nl"
+)
+
+die() { echo "ltvb-deployer: $*" >&2; exit 64; }
+
+# A DNS label or dotted name: lowercase letters, digits, dots, hyphens. No "..",
+# no leading/trailing dot, no path separators.
+valid_name() {
+  local n="$1"
+  [[ "$n" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || return 1
+  [[ "$n" != *".."* ]] || return 1
+  return 0
+}
+
+valid_domain() {
+  local d="$1" allowed
+  for allowed in "${ALLOWED_DOMAINS[@]}"; do
+    [[ "$d" == "$allowed" ]] && return 0
+  done
+  return 1
+}
+
+# Relative www-root inside the webspace, e.g. "git.ltvb.nl/public".
+# Allow letters/digits/dot/underscore/hyphen/slash only; forbid "..", absolute paths.
+valid_relpath() {
+  local p="$1"
+  [[ "$p" =~ ^[A-Za-z0-9._/-]+$ ]] || return 1
+  [[ "$p" != /* ]] || return 1
+  [[ "$p" != *".."* ]] || return 1
+  return 0
+}
+
+require_args() {
+  local need="$1" got="$2"
+  [[ "$got" -eq "$need" ]] || die "wrong number of arguments (need $need, got $got)"
+}
+
+verb="${1:-}"; shift || true
+
+case "$verb" in
+  list-domains)
+    require_args 0 "$#"
+    # TSV: fqdn \t www_root  (one row per domain & subdomain that has hosting)
+    plesk db -Ne "SELECT d.name, COALESCE(h.www_root,'') FROM domains d LEFT JOIN hosting h ON h.dom_id = d.id ORDER BY d.name;"
+    ;;
+
+  create-subdomain)
+    require_args 2 "$#"
+    sub="$1"; parent="$2"
+    valid_name "$sub"        || die "invalid subdomain: $sub"
+    valid_domain "$parent"   || die "domain not allowed: $parent"
+    # Idempotent: if it already exists, that's fine.
+    if plesk bin subdomain --info "$sub" -domain "$parent" >/dev/null 2>&1; then
+      echo "subdomain $sub.$parent already exists"
+      exit 0
+    fi
+    plesk bin subdomain --create "$sub" -domain "$parent"
+    ;;
+
+  set-docroot)
+    require_args 3 "$#"
+    sub="$1"; parent="$2"; relpath="$3"
+    valid_name "$sub"        || die "invalid subdomain: $sub"
+    valid_domain "$parent"   || die "domain not allowed: $parent"
+    valid_relpath "$relpath" || die "invalid www-root: $relpath"
+    plesk bin subdomain --update "$sub" -domain "$parent" -www-root "$relpath"
+    ;;
+
+  reconfigure)
+    require_args 1 "$#"
+    fqdn="$1"
+    valid_name "$fqdn" || die "invalid fqdn: $fqdn"
+    plesk sbin httpdmng --reconfigure-domain "$fqdn"
+    ;;
+
+  remove-subdomain)
+    require_args 2 "$#"
+    sub="$1"; parent="$2"
+    valid_name "$sub"      || die "invalid subdomain: $sub"
+    valid_domain "$parent" || die "domain not allowed: $parent"
+    plesk bin subdomain --remove "$sub" -domain "$parent"
+    ;;
+
+  *)
+    die "unknown verb: ${verb:-<none>} (allowed: list-domains create-subdomain set-docroot reconfigure remove-subdomain)"
+    ;;
+esac

@@ -1,0 +1,25 @@
+# Solid Queue worker for the apps.ltvb.nl manager.
+#
+# Passenger runs the web process but NOT the Solid Queue supervisor, so deploy
+# jobs need their own long-running process. Install as root:
+#
+#   install -o root -g root -m 0644 deploy/ltvb-apps-jobs.service /etc/systemd/system/ltvb-apps-jobs.service
+#   systemctl daemon-reload && systemctl enable --now ltvb-apps-jobs
+#   systemctl status ltvb-apps-jobs
+#
+[Unit]
+Description=ltvb-apps Solid Queue worker
+After=network.target
+
+[Service]
+Type=simple
+User=ltvb
+Group=psacln
+WorkingDirectory=/var/www/vhosts/ltvb.nl/apps.ltvb.nl
+Environment=HOME=/var/www/vhosts/ltvb.nl
+ExecStart=/bin/bash -lc 'export RBENV_ROOT=/var/www/vhosts/ltvb.nl/.rbenv; export PATH=$RBENV_ROOT/shims:$RBENV_ROOT/bin:$PATH; export RAILS_ENV=production; exec bundle exec rails solid_queue:start'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

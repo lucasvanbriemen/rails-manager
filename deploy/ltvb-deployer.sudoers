@@ -1,0 +1,5 @@
+# Lets the unprivileged `ltvb` web user run ONLY the vetted deployer wrapper as
+# root, without a password. The wrapper itself validates every argument.
+# Install as /etc/sudoers.d/ltvb-deployer (mode 0440, owned root:root) and verify
+# with: visudo -cf /etc/sudoers.d/ltvb-deployer
+ltvb ALL=(root) NOPASSWD: /usr/local/sbin/ltvb-deployer

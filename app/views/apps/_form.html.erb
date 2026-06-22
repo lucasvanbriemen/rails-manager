@@ -1,0 +1,49 @@
+<%= form_with model: app, html: { multipart: true, class: "card form" } do |f| %>
+  <% if app.errors.any? %>
+    <div class="flash flash--alert">
+      <%= app.errors.full_messages.to_sentence %>
+    </div>
+  <% end %>
+
+  <label><span>Display name</span><%= f.text_field :name, placeholder: "git.ltvb.nl" %></label>
+
+  <div class="form-row">
+    <label><span>Subdomain</span><%= f.text_field :subdomain, placeholder: "git" %></label>
+    <label><span>Domain</span>
+      <%= f.select :domain, %w[ltvb.nl lucasvanbriemen.nl], { include_blank: false } %>
+    </label>
+  </div>
+
+  <label><span>Ruby version</span><%= f.text_field :ruby_version, placeholder: "3.3.8" %></label>
+
+  <div class="form-row">
+    <label><span>Source mode</span><%= f.select :source_mode, App::SOURCE_MODES %></label>
+    <label><span>Primary DB</span><%= f.select :primary_db_kind, App::PRIMARY_DB_KINDS %></label>
+  </div>
+  <p class="hint">Choose <code>external</code> if the primary DB is a shared/remote DB (e.g. MySQL). The deploy will never auto-migrate it.</p>
+
+  <fieldset>
+    <legend>Git source</legend>
+    <label><span>Repo URL</span><%= f.text_field :git_repo_url, placeholder: "https://github.com/you/app.git" %></label>
+    <label><span>Branch</span><%= f.text_field :git_branch, placeholder: "main" %></label>
+  </fieldset>
+
+  <% if app.upload? || app.new_record? %>
+    <fieldset>
+      <legend>Upload source (tar.gz)</legend>
+      <label><span>Tarball</span><%= file_field_tag :tarball, accept: ".gz,.tgz,.tar.gz" %></label>
+      <p class="hint">Only used when source mode is <code>upload</code>. Provide on create or each deploy.</p>
+    </fieldset>
+  <% end %>
+
+  <label><span>config/master.key</span><%= f.text_area :master_key, rows: 1, class: "mono", placeholder: "32-char hex (leave blank if app needs no credentials)" %></label>
+
+  <label><span>.env</span><%= f.text_area :env_text, rows: 6, class: "mono", placeholder: "DB_HOST=...\nDB_DATABASE=..." %></label>
+
+  <label><span>Notes</span><%= f.text_area :notes, rows: 2 %></label>
+
+  <div class="form-actions">
+    <%= f.submit (app.new_record? ? "Create & deploy" : "Save"), class: "btn btn--primary" %>
+    <%= link_to "Cancel", (app.new_record? ? root_path : app_path(app)), class: "btn" %>
+  </div>
+<% end %>

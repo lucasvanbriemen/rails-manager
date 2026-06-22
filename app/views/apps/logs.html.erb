@@ -1,0 +1,11 @@
+<% content_for :title, "Logs · #{@app.fqdn}" %>
+<div class="page-head">
+  <h1>Logs · <%= @app.fqdn %></h1>
+  <%= link_to "← Back", app_path(@app), class: "btn" %>
+</div>
+
+<h2>production.log</h2>
+<pre class="logbox"><%= @production_log %></pre>
+
+<h2>Apache error_log</h2>
+<pre class="logbox"><%= @error_log %></pre>

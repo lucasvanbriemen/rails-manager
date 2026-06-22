@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for(:title) || "App Manager" %></title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+
+    <%= yield :head %>
+
+    <link rel="icon" href="/icon.svg">
+    <link rel="apple-touch-icon" href="/icon.png">
+
+    <%# Local app styles (app/assets/stylesheets) + every shared stylesheet,
+        auto-discovered in config/application.rb. %>
+    <%= stylesheet_link_tag :application, "data-turbo-track": "reload" %>
+    <% Array(Rails.application.config.x.shared_stylesheets).each do |sheet| %>
+      <%= stylesheet_link_tag sheet, "data-turbo-track": "reload" %>
+    <% end %>
+    <%= javascript_importmap_tags %>
+  </head>
+
+  <body>
+    <header class="topbar">
+      <a href="<%= root_path %>" class="topbar__brand">ltvb&nbsp;apps</a>
+      <nav class="topbar__nav">
+        <%= link_to "Dashboard", root_path %>
+        <%= link_to "New app", new_app_path %>
+      </nav>
+      <% if current_account %>
+        <span class="topbar__user"><%= current_account["name"] || current_account["email"] %></span>
+      <% end %>
+    </header>
+
+    <main class="container">
+      <% if flash[:notice] %><div class="flash flash--notice"><%= flash[:notice] %></div><% end %>
+      <% if flash[:alert] %><div class="flash flash--alert"><%= flash[:alert] %></div><% end %>
+      <%= yield %>
+    </main>
+  </body>
+</html>

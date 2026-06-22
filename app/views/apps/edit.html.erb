@@ -1,0 +1,3 @@
+<% content_for :title, "Edit #{@app.fqdn}" %>
+<div class="page-head"><h1>Edit <%= @app.fqdn %></h1></div>
+<%= render "form", app: @app %>

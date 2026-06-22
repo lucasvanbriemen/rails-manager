@@ -1,0 +1,53 @@
+<% content_for :title, "App Manager" %>
+
+<div class="page-head">
+  <h1>Apps</h1>
+  <%= link_to "+ New app", new_app_path, class: "btn btn--primary" %>
+</div>
+
+<% if @apps.empty? %>
+  <p class="muted">No apps tracked yet. Create one, or import an existing subdomain below.</p>
+<% else %>
+  <table class="apps">
+    <thead>
+      <tr><th>App</th><th>Status</th><th>Ruby</th><th>Source</th><th>Last deploy</th><th></th></tr>
+    </thead>
+    <tbody>
+      <% @apps.each do |app| %>
+        <tr>
+          <td>
+            <%= link_to app.name, app_path(app), class: "apps__name" %>
+            <div class="muted"><a href="<%= app.url %>" target="_blank" rel="noopener"><%= app.fqdn %></a></div>
+          </td>
+          <td><%= status_badge(@statuses[app.id] || { status: :unknown }) %></td>
+          <td><code><%= app.ruby_version %></code></td>
+          <td><%= app.source_mode %><% if app.git? %> <span class="muted"><%= app.git_branch %></span><% end %></td>
+          <td>
+            <% if (d = app.last_deployment) %>
+              <%= deployment_badge(d) %>
+              <span class="muted"><%= time_ago_in_words(d.created_at) %> ago</span>
+            <% else %>
+              <span class="muted">never</span>
+            <% end %>
+          </td>
+          <td class="row-actions">
+            <%= button_to "Deploy", deploy_app_path(app), class: "btn btn--small" %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% end %>
+
+<% if @untracked.present? %>
+  <h2 class="section">Untracked Rails subdomains</h2>
+  <p class="muted">These Plesk subdomains serve from a <code>/public</code> root but aren't managed yet.</p>
+  <ul class="untracked">
+    <% @untracked.each do |d| %>
+      <li>
+        <code><%= d[:fqdn] %></code>
+        <%= button_to "Import", import_apps_path, params: { fqdn: d[:fqdn] }, class: "btn btn--small" %>
+      </li>
+    <% end %>
+  </ul>
+<% end %>
