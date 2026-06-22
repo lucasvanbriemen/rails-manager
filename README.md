@@ -66,6 +66,24 @@ systemctl daemon-reload && systemctl enable --now ltvb-apps-jobs
 - `ADMIN_EMAILS` — comma-separated SSO emails allowed to use the manager.
 - `AR_ENCRYPTION_*` — keys for encrypting stored `master.key`/`.env` values.
 
+## Known gotchas (surfaced while building this)
+
+- **Plesk default page.** A new subdomain's docroot defaults to the app folder,
+  not `public/`; Plesk also drops a "Domain Default page" `index.html` into the
+  docroot. With Passenger on, that static index shadows Rails. The recipe fixes
+  the docroot and removes the placeholder.
+- **Ruby/Passenger must be enabled** per subdomain (`plesk ext ruby --enable`),
+  else Apache 403s. Done by the `enable-ruby` step.
+- **`bundle install` must use the rbenv Ruby**, not the system Ruby (missing
+  headers → native gem build fails).
+- **Passenger + bundler default-gem conflict.** Passenger's pure-Ruby loader
+  (native support disabled here) pre-activates Ruby's *default* `stringio`
+  before `bundler/setup`. If an app's lock resolves a newer `stringio`, the spawn
+  dies with `You have already activated stringio X, but your Gemfile requires Y`.
+  Fix: pin it to the Ruby default in the app's Gemfile, e.g. `gem "stringio", "3.1.1"`,
+  and re-bundle. The manager's verify step catches this (site won't boot) and the
+  deploy is marked failed rather than silently "deployed".
+
 ## Local development
 
 ```sh

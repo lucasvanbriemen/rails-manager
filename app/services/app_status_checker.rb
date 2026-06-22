@@ -50,9 +50,10 @@ module AppStatusChecker
     end
   end
 
+  # Only the body text is reliable: Plesk appends "x-powered-by: PleskLin" to
+  # EVERY response (including healthy Rails apps), so that header can't be used.
   def placeholder?(res)
-    res["x-powered-by"].to_s.include?("PleskLin") ||
-      res.body.to_s.include?("Domain Default page")
+    res.body.to_s.include?("Domain Default page")
   end
 
   def rails?(res)
