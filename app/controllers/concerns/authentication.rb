@@ -29,21 +29,11 @@ module Authentication
       return redirect_to "#{LOGIN_URL}?redirect=#{CGI.escape(request.original_url)}", allow_other_host: true
     end
 
-    unless admin?(@current_account)
-      return render plain: "Not authorized. This account may not manage apps.", status: :forbidden
-    end
-
     # Token arrived via the URL (login redirect); persist it as a cookie and clean the URL.
     if params[:auth_token].present?
       store_auth_cookie(token)
       redirect_to clean_url
     end
-  end
-
-  def admin?(account)
-    admins = ENV.fetch("ADMIN_EMAILS", "").split(",").map { |e| e.strip.downcase }.reject(&:blank?)
-    email  = account["email"].to_s.downcase
-    admins.include?(email)
   end
 
   def auth_token
