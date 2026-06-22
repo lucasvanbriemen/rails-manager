@@ -1,7 +1,7 @@
 {
   "ignored_warnings": [
     {
-      "fingerprint": "22d11d4c3692cb7b3921f17eb6fe12ca09f5e9452a5cf06c4745efe8e3272c08",
+      "fingerprint": "65c06b4ec11db4048bd7cacebce215a2b00a985c8e03af445e8314d53f2cf502",
       "check_name": "SSLVerify",
       "message": "SSL certificate verification was bypassed",
       "file": "app/services/app_status_checker.rb",

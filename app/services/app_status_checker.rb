@@ -2,51 +2,62 @@ require "net/http"
 
 # Classifies what an app's URL actually serves right now. The whole point of the
 # manager: catch the git.ltvb.nl failure mode (Plesk serving its default
-# placeholder because Passenger never found the app) automatically.
+# placeholder because Passenger never found the app) automatically — without
+# false-flagging healthy apps (e.g. an API app whose "/" legitimately 404s).
 module AppStatusChecker
-  # Statuses considered "up" — a Rails response, or a redirect (e.g. the SSO
-  # bounce to login.ltvb.nl, which is the expected state for gated apps).
+  # Statuses considered "up": a Rails response (any code it actually handled),
+  # or a redirect (e.g. the SSO bounce to login.ltvb.nl).
   HEALTHY = %i[rails redirect].freeze
 
   module_function
 
   # => { status: Symbol, code: Integer|nil, detail: String }
   def check(app)
-    uri = URI(app.url)
-    res = request(uri)
+    base = app.url # https://fqdn/
+
+    # Prefer Rails' built-in /up health endpoint — 200 means the app booted.
+    up = safe_request(URI(base + "up"))
+    if up && up.code.to_i == 200 && !placeholder?(up)
+      return { status: :rails, code: 200, detail: "/up healthy" }
+    end
+
+    res = safe_request(URI(base))
+    return { status: :down, code: nil, detail: "no response" } unless res
+
     classify(res)
-  rescue StandardError => e
-    { status: :down, code: nil, detail: e.message }
   end
 
-  def request(uri)
+  def safe_request(uri)
     http = Net::HTTP.new(uri.host, uri.port)
     http.use_ssl = (uri.scheme == "https")
     http.open_timeout = 5
     http.read_timeout = 5
-    # This is a server-side health probe of our own hosts. New subdomains carry
-    # a self-signed cert until Let's Encrypt issues one, so we deliberately do
-    # NOT verify the chain — we care whether the app responds, not cert trust.
+    # Server-side probe of our own hosts; new subdomains have self-signed certs
+    # until Let's Encrypt issues one, so we don't verify the chain.
     http.verify_mode = OpenSSL::SSL::VERIFY_NONE
     http.get(uri.request_uri.presence || "/")
+  rescue StandardError
+    nil
   end
 
   def classify(res)
     code = res.code.to_i
 
+    return { status: :placeholder, code: code, detail: "Plesk default page — Passenger not serving the app" } if placeholder?(res)
+
     case code
     when 300..399
-      { status: :redirect, code: code, detail: "→ #{res["location"]}" }
+      { status: :redirect, code: code, detail: "→ #{res['location']}" }
     when 500..599
       { status: :error5xx, code: code, detail: "server error" }
-    when 200..299
-      if placeholder?(res)
-        { status: :placeholder, code: code, detail: "Plesk default page — Passenger not serving the app" }
-      else
-        { status: :rails, code: code, detail: rails?(res) ? "Rails (x-request-id present)" : "app responded" }
-      end
     else
-      { status: :unknown, code: code, detail: "unexpected status" }
+      # Any other code the app actually handled (200, 401, 404, …): if Rails
+      # served it, the app is up. An API app with no root route 404s — fine.
+      if rails?(res)
+        { status: :rails, code: code, detail: "Rails responded (#{code})" }
+      else
+        { status: :unknown, code: code, detail: "non-Rails response" }
+      end
     end
   end
 
