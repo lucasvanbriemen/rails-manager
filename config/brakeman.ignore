@@ -1,0 +1,13 @@
+{
+  "ignored_warnings": [
+    {
+      "fingerprint": "22d11d4c3692cb7b3921f17eb6fe12ca09f5e9452a5cf06c4745efe8e3272c08",
+      "check_name": "SSLVerify",
+      "message": "SSL certificate verification was bypassed",
+      "file": "app/services/app_status_checker.rb",
+      "note": "Intentional: server-side health probe of our own hosts. New subdomains use a self-signed cert until Let's Encrypt issues one; we check whether the app responds, not cert trust."
+    }
+  ],
+  "updated": "2026-06-22",
+  "brakeman_version": "8.0.4"
+}

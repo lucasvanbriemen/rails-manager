@@ -24,6 +24,10 @@ module AppStatusChecker
     http.use_ssl = (uri.scheme == "https")
     http.open_timeout = 5
     http.read_timeout = 5
+    # This is a server-side health probe of our own hosts. New subdomains carry
+    # a self-signed cert until Let's Encrypt issues one, so we deliberately do
+    # NOT verify the chain — we care whether the app responds, not cert trust.
+    http.verify_mode = OpenSSL::SSL::VERIFY_NONE
     http.get(uri.request_uri.presence || "/")
   end
 

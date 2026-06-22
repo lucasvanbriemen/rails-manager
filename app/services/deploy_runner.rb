@@ -1,5 +1,6 @@
 require "open3"
 require "fileutils"
+require "bundler"
 
 # Executes the deploy recipe (the steps learned from fixing git.ltvb.nl), one
 # ordered step at a time, streaming all output into the Deployment log. Runs as
@@ -59,6 +60,7 @@ class DeployRunner
 
   def deploy!
     fetch_code!
+    clean_placeholder!
     write_secrets!
     bundle_install!
     prepare_databases!
@@ -87,6 +89,19 @@ class DeployRunner
     FileUtils.mkdir_p(@app.app_path)
     run! "tar", "xzf", @upload_tarball, "-C", @app.app_path
     @deployment.update!(ref: "upload")
+  end
+
+  # Plesk seeds a new docroot with its "Domain Default page" index.html. With
+  # Passenger on, a public/index.html shadows the Rails root — so the site shows
+  # the placeholder forever. Remove it (only when it's actually the Plesk page).
+  def clean_placeholder!
+    [ File.join(@app.public_path, "index.html"), File.join(@app.app_path, "index.html") ].each do |f|
+      next unless File.exist?(f)
+      next unless File.read(f).include?("Domain Default page")
+
+      File.delete(f)
+      log "removed Plesk placeholder #{f}\n"
+    end
   end
 
   def record_git_ref!
@@ -207,11 +222,15 @@ class DeployRunner
     raise StepFailed, cmd.first(3).join(" ") unless ok
   end
 
+  # with_unbundled_env strips the MANAGER's bundler context (RUBYOPT=-rbundler/setup,
+  # BUNDLE_GEMFILE, GEM_*) so the child uses the TARGET app's bundler, not ours.
   def stream(cmd, env, chdir)
-    Open3.popen2e(env, *cmd, chdir: chdir, unsetenv_others: false) do |stdin, out, wait|
-      stdin.close
-      out.each_line { |line| @deployment.append_log(line) }
-      wait.value.success?
+    Bundler.with_unbundled_env do
+      Open3.popen2e(env, *cmd, chdir: chdir, unsetenv_others: false) do |stdin, out, wait|
+        stdin.close
+        out.each_line { |line| @deployment.append_log(line) }
+        wait.value.success?
+      end
     end
   rescue Errno::ENOENT => e
     @deployment.append_log("command not found: #{e.message}\n")
@@ -219,7 +238,9 @@ class DeployRunner
   end
 
   def capture(*cmd)
-    Open3.capture3(child_env, *cmd, chdir: @app.app_path, unsetenv_others: false)
+    Bundler.with_unbundled_env do
+      Open3.capture3(child_env, *cmd, chdir: @app.app_path, unsetenv_others: false)
+    end
   rescue StandardError
     [ "", "", nil ]
   end
