@@ -1,4 +1,5 @@
 class App < ApplicationRecord
+  APP_KINDS = %w[rails repo].freeze
   SOURCE_MODES = %w[git upload].freeze
   PRIMARY_DB_KINDS = %w[sqlite external].freeze
 
@@ -9,16 +10,30 @@ class App < ApplicationRecord
   encrypts :master_key
   encrypts :env_text
 
-  validates :name, :subdomain, :domain, :ruby_version, presence: true
-  validates :subdomain, uniqueness: { scope: :domain }
-  validates :subdomain, format: { with: /\A[a-z0-9]([a-z0-9-]*[a-z0-9])?\z/,
-                                  message: "must be a valid hostname label" }
-  validates :domain, format: { with: /\A[a-z0-9.-]+\z/ }
+  validates :name, presence: true
+  validates :app_kind, inclusion: { in: APP_KINDS }
   validates :source_mode, inclusion: { in: SOURCE_MODES }
   validates :primary_db_kind, inclusion: { in: PRIMARY_DB_KINDS }
   validates :git_repo_url, presence: true, if: :git?
 
-  normalizes :subdomain, :domain, with: ->(v) { v.to_s.strip.downcase }
+  # Rails (Plesk subdomain) apps need a subdomain/domain/ruby; repos don't.
+  with_options if: :rails_app? do
+    validates :subdomain, :domain, :ruby_version, presence: true
+    validates :subdomain, uniqueness: { scope: :domain }
+    validates :subdomain, format: { with: /\A[a-z0-9]([a-z0-9-]*[a-z0-9])?\z/,
+                                    message: "must be a valid hostname label" }
+    validates :domain, format: { with: /\A[a-z0-9.-]+\z/ }
+  end
+
+  # Repos live at a custom path and are git-only (nothing to upload-build).
+  with_options if: :repo? do
+    validates :deploy_path, presence: true
+    validates :source_mode, inclusion: { in: %w[git],
+                                         message: "must be git for a repo" }
+  end
+
+  normalizes :subdomain, :domain, with: ->(v) { v.to_s.strip.downcase.presence }
+  normalizes :deploy_path, with: ->(v) { v.to_s.strip.chomp("/").presence }
 
   def fqdn
     "#{subdomain}.#{domain}"
@@ -29,8 +44,10 @@ class App < ApplicationRecord
     "/var/www/vhosts/#{domain}"
   end
 
+  # Where the code lives on disk: a repo's explicit checkout path, otherwise the
+  # Plesk-derived subdomain folder.
   def app_path
-    "#{webspace_root}/#{fqdn}"
+    repo? ? deploy_path : "#{webspace_root}/#{fqdn}"
   end
 
   def public_path
@@ -46,9 +63,17 @@ class App < ApplicationRecord
     "#{webspace_root}/.rbenv"
   end
 
+  def rails_app? = app_kind == "rails"
+  def repo?      = app_kind == "repo"
   def git?    = source_mode == "git"
   def upload? = source_mode == "upload"
   def external_primary? = primary_db_kind == "external"
+
+  # Follow-up shell commands for a repo: one per non-blank, non-comment line.
+  def post_deploy_command_list
+    post_deploy_commands.to_s.lines.map(&:strip)
+                        .reject { |l| l.empty? || l.start_with?("#") }
+  end
 
   def last_deployment
     deployments.first

@@ -20,15 +20,19 @@ class DeployRunner
 
   def call
     @deployment.start!
-    log "== #{@deployment.kind} #{@app.fqdn} @ #{Time.current} ==\n"
+    log "== #{@deployment.kind} #{@app.repo? ? @app.name : @app.fqdn} @ #{Time.current} ==\n"
 
-    case @deployment.kind
-    when "create"          then provision!; deploy!
-    when "deploy"          then deploy!
-    when "restart"         then restart!; verify!
-    when "migrate_primary" then migrate_primary!
-    when "destroy"         then destroy!
-    else raise StepFailed, "unknown kind #{@deployment.kind}"
+    if @app.repo?
+      run_repo!
+    else
+      case @deployment.kind
+      when "create"          then provision!; deploy!
+      when "deploy"          then deploy!
+      when "restart"         then restart!; verify!
+      when "migrate_primary" then migrate_primary!
+      when "destroy"         then destroy!
+      else raise StepFailed, "unknown kind #{@deployment.kind}"
+      end
     end
 
     @deployment.finish!(true)
@@ -45,6 +49,37 @@ class DeployRunner
   end
 
   private
+
+  # ---- repo recipe ---------------------------------------------------------
+
+  # A plain git repo (e.g. ui-components): pull to its custom path, optionally
+  # write a .env, then run the configured follow-up commands. No Plesk, Ruby,
+  # bundle, assets, Passenger, or health check — none of that applies.
+  def run_repo!
+    return repo_destroy! if @deployment.kind == "destroy"
+
+    git_sync!
+    record_git_ref!
+    write_secrets!
+    run_post_deploy_commands!
+  end
+
+  def run_post_deploy_commands!
+    commands = @app.post_deploy_command_list
+    if commands.empty?
+      log "\n--- no follow-up commands configured ---\n"
+      return
+    end
+
+    log "\n--- follow-up commands (#{commands.size}) ---\n"
+    commands.each { |cmd| run_shell! cmd }
+  end
+
+  # A repo isn't a Plesk subdomain — there's nothing to remove on the server.
+  # The on-disk checkout is left in place; the manager just stops tracking it.
+  def repo_destroy!
+    log "\n--- stop managing repo (on-disk checkout left at #{@app.app_path}) ---\n"
+  end
 
   # ---- recipe phases -------------------------------------------------------
 
@@ -261,6 +296,8 @@ class DeployRunner
   # Child env: target app's rbenv on PATH, production, and the manager's own
   # bundler/ruby context stripped out (nil unsets the var in the child).
   def child_env(extra = {})
+    return repo_env(extra) if @app.repo?
+
     {
       "RBENV_ROOT"        => @app.rbenv_root,
       "PATH"              => "#{@app.rbenv_root}/shims:#{@app.rbenv_root}/bin:/usr/local/bin:/usr/bin:/bin",
@@ -282,10 +319,34 @@ class DeployRunner
     }.merge(extra)
   end
 
+  # Repos build with the ltvb user's normal environment (its real HOME, so
+  # nvm/node, npm caches and git/ssh credentials resolve), minus the manager's
+  # own bundler/ruby context. No rbenv, RAILS_ENV, or dummy secret — not Rails.
+  def repo_env(extra = {})
+    {
+      "BUNDLE_GEMFILE"    => nil,
+      "BUNDLE_PATH"       => nil,
+      "BUNDLE_APP_CONFIG" => nil,
+      "BUNDLE_WITHOUT"    => nil,
+      "RUBYOPT"           => nil,
+      "RUBYLIB"           => nil,
+      "GEM_HOME"          => nil,
+      "GEM_PATH"          => nil
+    }.merge(extra)
+  end
+
   def run!(*cmd, extra_env: {})
     log "\n$ #{cmd.join(' ')}\n"
     ok = stream(cmd, child_env(extra_env), @app.app_path)
     raise StepFailed, cmd.first(3).join(" ") unless ok
+  end
+
+  # A user-entered command line, run through a login shell so the ltvb user's
+  # profile (nvm/node, rbenv, PATH) is sourced and shell syntax (&&, |) works.
+  def run_shell!(command)
+    log "\n$ #{command}\n"
+    ok = stream([ "bash", "-lc", command ], child_env, @app.app_path)
+    raise StepFailed, command unless ok
   end
 
   # with_unbundled_env strips the MANAGER's bundler context (RUBYOPT=-rbundler/setup,

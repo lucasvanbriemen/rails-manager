@@ -30,6 +30,21 @@ dead. This tool turns that ~12-step fix into one button.
 7. **Restart**: `touch tmp/restart.txt`.
 8. **Verify**: HTTP-check the live site is Rails (not the Plesk placeholder/5xx).
 
+## App kinds
+
+The manager tracks two kinds of "app":
+
+- **Rails app** (`app_kind: "rails"`) — a Plesk-served subdomain, the full recipe
+  above (provision → fetch → secrets → gems → DBs → assets → restart → verify).
+- **Repo** (`app_kind: "repo"`) — a plain git checkout at a custom path (e.g. the
+  shared `ui-components` library) that just gets pulled and then runs configured
+  follow-up commands. No Plesk subdomain, Ruby/rbenv, bundle, assets, Passenger,
+  or health check. Set **Checkout path** (where to pull) and **Follow-up commands**
+  (one shell command per line, run in order from the checkout via a login shell so
+  `nvm`/`node` are available, e.g. `npm ci` then `npm run build`). "Deploy" does
+  `git fetch` + `git reset --hard`, writes an optional `.env`, then runs the
+  commands; "Delete" just stops tracking it (the on-disk checkout is left in place).
+
 ## Architecture
 
 - Runs as the unprivileged `ltvb` user via Passenger. All non-root steps (git,

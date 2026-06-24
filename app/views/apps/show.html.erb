@@ -3,12 +3,20 @@
 <div class="page-head">
   <div>
     <h1><%= @app.name %></h1>
-    <div class="muted"><a href="<%= @app.url %>" target="_blank" rel="noopener"><%= @app.fqdn %></a> · <%= status_badge(@status) %></div>
+    <div class="muted">
+      <% if @app.repo? %>
+        <span class="mono"><%= @app.deploy_path %></span> · <%= status_badge(status: :repo) %>
+      <% else %>
+        <a href="<%= @app.url %>" target="_blank" rel="noopener"><%= @app.fqdn %></a> · <%= status_badge(@status) %>
+      <% end %>
+    </div>
   </div>
   <div class="head-actions">
     <%= button_to "Deploy", deploy_app_path(@app), class: "btn btn--primary" %>
-    <%= button_to "Restart", restart_app_path(@app), class: "btn" %>
-    <%= link_to "Logs", logs_app_path(@app), class: "btn" %>
+    <% unless @app.repo? %>
+      <%= button_to "Restart", restart_app_path(@app), class: "btn" %>
+      <%= link_to "Logs", logs_app_path(@app), class: "btn" %>
+    <% end %>
     <%= link_to "Edit", edit_app_path(@app), class: "btn" %>
   </div>
 </div>
@@ -16,21 +24,40 @@
 <div class="cols">
   <section class="card">
     <h2>Configuration</h2>
-    <dl class="kv">
-      <dt>Path</dt><dd class="mono"><%= @app.app_path %></dd>
-      <dt>Document root</dt><dd class="mono"><%= @app.public_path %></dd>
-      <dt>Ruby</dt><dd><code><%= @app.ruby_version %></code></dd>
-      <dt>Source</dt><dd><%= @app.source_mode %><% if @app.git? %> — <%= @app.git_repo_url %> (<%= @app.git_branch %>)<% end %></dd>
-      <dt>Primary DB</dt><dd><%= @app.primary_db_kind %></dd>
-      <dt>master.key</dt><dd><%= @app.master_key.present? ? "set" : "—" %></dd>
-      <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
-    </dl>
-    <% if @app.external_primary? %>
-      <%= button_to "Migrate primary DB", migrate_primary_app_path(@app), class: "btn btn--warn",
-            form: { data: { turbo_confirm: "Run migrations against the EXTERNAL/shared primary DB for #{@app.fqdn}?" } } %>
+    <% if @app.repo? %>
+      <dl class="kv">
+        <dt>Checkout path</dt><dd class="mono"><%= @app.deploy_path %></dd>
+        <dt>Source</dt><dd><%= @app.git_repo_url %> (<%= @app.git_branch %>)</dd>
+        <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
+        <dt>Follow-up</dt>
+        <dd>
+          <% cmds = @app.post_deploy_command_list %>
+          <% if cmds.empty? %>
+            <span class="muted">none</span>
+          <% else %>
+            <ol class="mono"><% cmds.each { |c| %><li><%= c %></li><% } %></ol>
+          <% end %>
+        </dd>
+      </dl>
+      <%= button_to "Stop managing", app_path(@app), method: :delete, class: "btn btn--danger",
+            form: { data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } } %>
+    <% else %>
+      <dl class="kv">
+        <dt>Path</dt><dd class="mono"><%= @app.app_path %></dd>
+        <dt>Document root</dt><dd class="mono"><%= @app.public_path %></dd>
+        <dt>Ruby</dt><dd><code><%= @app.ruby_version %></code></dd>
+        <dt>Source</dt><dd><%= @app.source_mode %><% if @app.git? %> — <%= @app.git_repo_url %> (<%= @app.git_branch %>)<% end %></dd>
+        <dt>Primary DB</dt><dd><%= @app.primary_db_kind %></dd>
+        <dt>master.key</dt><dd><%= @app.master_key.present? ? "set" : "—" %></dd>
+        <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
+      </dl>
+      <% if @app.external_primary? %>
+        <%= button_to "Migrate primary DB", migrate_primary_app_path(@app), class: "btn btn--warn",
+              form: { data: { turbo_confirm: "Run migrations against the EXTERNAL/shared primary DB for #{@app.fqdn}?" } } %>
+      <% end %>
+      <%= button_to "Delete app", app_path(@app), method: :delete, class: "btn btn--danger",
+            form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } } %>
     <% end %>
-    <%= button_to "Delete app", app_path(@app), method: :delete, class: "btn btn--danger",
-          form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } } %>
   </section>
 
   <section class="card">

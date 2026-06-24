@@ -2,7 +2,10 @@
 
 <div class="page-head">
   <h1>Apps</h1>
-  <%= link_to "+ New app", new_app_path, class: "btn btn--primary" %>
+  <div class="head-actions">
+    <%= link_to "+ New app", new_app_path, class: "btn btn--primary" %>
+    <%= link_to "+ New repo", new_app_path(app_kind: "repo"), class: "btn" %>
+  </div>
 </div>
 
 <% if @apps.empty? %>
@@ -17,10 +20,16 @@
         <tr>
           <td>
             <%= link_to app.name, app_path(app), class: "apps__name" %>
-            <div class="muted"><a href="<%= app.url %>" target="_blank" rel="noopener"><%= app.fqdn %></a></div>
+            <div class="muted">
+              <% if app.repo? %>
+                <span class="mono"><%= app.deploy_path %></span>
+              <% else %>
+                <a href="<%= app.url %>" target="_blank" rel="noopener"><%= app.fqdn %></a>
+              <% end %>
+            </div>
           </td>
           <td><%= status_badge(@statuses[app.id] || { status: :unknown }) %></td>
-          <td><code><%= app.ruby_version %></code></td>
+          <td><%= app.repo? ? "—" : content_tag(:code, app.ruby_version) %></td>
           <td><%= app.source_mode %><% if app.git? %> <span class="muted"><%= app.git_branch %></span><% end %></td>
           <td>
             <% if (d = app.last_deployment) %>

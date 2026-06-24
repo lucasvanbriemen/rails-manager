@@ -6,12 +6,14 @@ class AppsController < ApplicationController
   end
 
   def show
-    @status = AppStatusChecker.check(@app)
+    @status = AppStatusChecker.check(@app) if @app.rails_app?
     @deployments = @app.deployments.limit(20)
   end
 
   def new
-    @app = App.new(ruby_version: "3.3.8", git_branch: "main", source_mode: "git", primary_db_kind: "sqlite")
+    @app = App.new(app_kind: params[:app_kind].presence || "rails",
+                   ruby_version: "3.3.8", git_branch: "main",
+                   source_mode: "git", primary_db_kind: "sqlite")
   end
 
   def create
@@ -36,6 +38,13 @@ class AppsController < ApplicationController
   end
 
   def destroy
+    # A repo isn't a Plesk subdomain — just stop tracking it (checkout stays on disk).
+    if @app.repo?
+      label = @app.name
+      @app.destroy
+      return redirect_to root_path, notice: "Stopped managing #{label} (on-disk checkout left in place)."
+    end
+
     result = Plesk.remove_subdomain(@app.subdomain, @app.domain)
     fqdn = @app.fqdn
     @app.destroy
@@ -117,8 +126,9 @@ class AppsController < ApplicationController
 
   def app_params
     params.require(:app).permit(
-      :name, :subdomain, :domain, :ruby_version, :source_mode,
+      :name, :app_kind, :subdomain, :domain, :ruby_version, :source_mode,
       :git_repo_url, :git_branch, :primary_db_kind, :notes,
+      :deploy_path, :post_deploy_commands,
       :master_key, :env_text
     )
   end

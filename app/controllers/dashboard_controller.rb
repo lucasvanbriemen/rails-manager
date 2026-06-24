@@ -18,9 +18,13 @@ class DashboardController < ApplicationController
   private
 
   def check_all(apps)
-    apps.map { |app| Thread.new { [ app.id, AppStatusChecker.check(app) ] } }
-        .map { |t| t.value }
-        .to_h
+    # Repos aren't served over HTTP — there's nothing to health-check.
+    rails_apps, repos = apps.partition(&:rails_app?)
+    statuses = rails_apps.map { |app| Thread.new { [ app.id, AppStatusChecker.check(app) ] } }
+                         .map { |t| t.value }
+                         .to_h
+    repos.each { |app| statuses[app.id] = { status: :repo, detail: "git repo (not served)" } }
+    statuses
   end
 
   def untracked_rails_subdomains

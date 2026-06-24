@@ -10,11 +10,11 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_22_190002) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_22_190003) do
   create_table "apps", force: :cascade do |t|
     t.string "name", null: false
-    t.string "subdomain", null: false
-    t.string "domain", null: false
+    t.string "subdomain"
+    t.string "domain"
     t.string "ruby_version", default: "3.3.8", null: false
     t.string "source_mode", default: "git", null: false
     t.string "git_repo_url"
@@ -25,6 +25,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_06_22_190002) do
     t.text "env_text"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "app_kind", default: "rails", null: false
+    t.string "deploy_path"
+    t.text "post_deploy_commands"
     t.index ["subdomain", "domain"], name: "index_apps_on_subdomain_and_domain", unique: true
   end
 

@@ -5,6 +5,7 @@ module ApplicationHelper
     placeholder: "Placeholder!",
     error5xx:    "5xx error",
     down:        "Down",
+    repo:        "Repo",
     unknown:     "Unknown"
   }.freeze
 
