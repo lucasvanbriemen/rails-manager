@@ -8,9 +8,6 @@
   </div>
 </div>
 
-<% if @apps.empty? %>
-  <p class="muted">No apps tracked yet. Create one, or import an existing subdomain below.</p>
-<% else %>
   <table class="apps">
     <thead>
       <tr><th>App</th><th>Status</th><th>Ruby</th><th>Source</th><th>Last deploy</th><th></th></tr>
@@ -46,17 +43,3 @@
       <% end %>
     </tbody>
   </table>
-<% end %>
-
-<% if @untracked.present? %>
-  <h2 class="section">Untracked Rails subdomains</h2>
-  <p class="muted">These Plesk subdomains serve from a <code>/public</code> root but aren't managed yet.</p>
-  <ul class="untracked">
-    <% @untracked.each do |d| %>
-      <li>
-        <code><%= d[:fqdn] %></code>
-        <%= button_to "Import", import_apps_path, params: { fqdn: d[:fqdn] }, class: "btn btn--small" %>
-      </li>
-    <% end %>
-  </ul>
-<% end %>
