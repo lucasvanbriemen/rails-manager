@@ -121,17 +121,25 @@ class DeployRunner
     target = @ref.presence || "origin/#{@app.git_branch}"
 
     if Dir.exist?(File.join(@app.app_path, ".git"))
-      run! "git", "-C", @app.app_path, "remote", "set-url", "origin", @app.git_repo_url
+      git! "remote", "set-url", "origin", @app.git_repo_url
     else
       log "initializing git checkout in #{@app.app_path}\n" unless Dir.exist?(@app.app_path)
       log "adopting existing directory as a git checkout\n" if Dir.exist?(@app.app_path)
       FileUtils.mkdir_p(@app.app_path)
-      run! "git", "-C", @app.app_path, "init", "-q", "-b", @app.git_branch
-      run! "git", "-C", @app.app_path, "remote", "add", "origin", @app.git_repo_url
+      git! "init", "-q", "-b", @app.git_branch
+      git! "remote", "add", "origin", @app.git_repo_url
     end
 
-    run! "git", "-C", @app.app_path, "fetch", "--prune", "origin"
-    run! "git", "-C", @app.app_path, "reset", "--hard", target
+    git! "fetch", "--prune", "origin"
+    git! "reset", "--hard", target
+  end
+
+  # Run git against the app's on-disk checkout. The checkout may have been
+  # created by a different user than the worker (`ltvb`) — an adopted directory,
+  # or one chowned by Plesk — so mark the path safe per-invocation. This avoids
+  # git's "dubious ownership" abort without touching any user's global gitconfig.
+  def git!(*args)
+    run! "git", "-c", "safe.directory=#{@app.app_path}", "-C", @app.app_path, *args
   end
 
   def unpack_upload!
@@ -165,7 +173,7 @@ class DeployRunner
   def record_git_ref!
     return unless @app.git?
 
-    out, _e, st = capture("git", "-C", @app.app_path, "rev-parse", "HEAD")
+    out, _e, st = capture("git", "-c", "safe.directory=#{@app.app_path}", "-C", @app.app_path, "rev-parse", "HEAD")
     @deployment.update!(ref: out.strip) if st&.success?
   end
 
