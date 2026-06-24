@@ -22,6 +22,10 @@ class DeployRunner
     @deployment.start!
     log "== #{@deployment.kind} #{@app.repo? ? @app.name : @app.fqdn} @ #{Time.current} ==\n"
 
+    if (reason = @app.undeployable_reason)
+      raise StepFailed, "refusing to deploy #{@app.name}: #{reason}"
+    end
+
     if @app.repo?
       run_repo!
     else

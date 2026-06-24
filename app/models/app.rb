@@ -39,6 +39,19 @@ class App < ApplicationRecord
     "#{subdomain}.#{domain}"
   end
 
+  # Guard for the deploy runner. A rails app with a blank subdomain/domain makes
+  # fqdn "." and app_path resolve to "/var/www/vhosts//." — inside the shared
+  # webspace root, where the runner's git reset --hard would be catastrophic.
+  # Validations normally prevent such a record, but a bad one (legacy, console,
+  # blank import) must never reach the filesystem. Returns a reason, or nil if safe.
+  def undeployable_reason
+    if repo?
+      "no checkout path configured" if deploy_path.blank?
+    elsif subdomain.blank? || domain.blank?
+      "missing subdomain or domain (resolved fqdn would be #{fqdn.inspect})"
+    end
+  end
+
   # Plesk lays every domain's files out under /var/www/vhosts/<domain>.
   def webspace_root
     "/var/www/vhosts/#{domain}"
