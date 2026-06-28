@@ -1,5 +1,7 @@
 class DeploymentsController < ApplicationController
   def show
+    return forbidden if cannot?(:read, :apps)
+
     @app = App.find(params[:app_id])
     @deployment = @app.deployments.find(params[:id])
 

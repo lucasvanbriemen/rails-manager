@@ -12,12 +12,18 @@
     </div>
   </div>
   <div class="head-actions">
-    <%= button_to "Deploy", deploy_app_path(@app), class: "btn btn--primary" %>
+    <% if can?(:update, :apps) %>
+      <%= button_to "Deploy", deploy_app_path(@app), class: "btn btn--primary" %>
+    <% end %>
     <% unless @app.repo? %>
-      <%= button_to "Restart", restart_app_path(@app), class: "btn" %>
+      <% if can?(:update, :apps) %>
+        <%= button_to "Restart", restart_app_path(@app), class: "btn" %>
+      <% end %>
       <%= link_to "Logs", logs_app_path(@app), class: "btn" %>
     <% end %>
-    <%= link_to "Edit", edit_app_path(@app), class: "btn" %>
+    <% if can?(:update, :apps) %>
+      <%= link_to "Edit", edit_app_path(@app), class: "btn" %>
+    <% end %>
   </div>
 </div>
 
@@ -39,8 +45,10 @@
           <% end %>
         </dd>
       </dl>
-      <%= button_to "Stop managing", app_path(@app), method: :delete, class: "btn btn--danger",
-            form: { data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } } %>
+      <% if can?(:delete, :apps) %>
+        <%= button_to "Stop managing", app_path(@app), method: :delete, class: "btn btn--danger",
+              form: { data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } } %>
+      <% end %>
     <% else %>
       <dl class="kv">
         <dt>Path</dt><dd class="mono"><%= @app.app_path %></dd>
@@ -51,12 +59,14 @@
         <dt>master.key</dt><dd><%= @app.master_key.present? ? "set" : "—" %></dd>
         <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
       </dl>
-      <% if @app.external_primary? %>
+      <% if @app.external_primary? && can?(:update, :apps) %>
         <%= button_to "Migrate primary DB", migrate_primary_app_path(@app), class: "btn btn--warn",
               form: { data: { turbo_confirm: "Run migrations against the EXTERNAL/shared primary DB for #{@app.fqdn}?" } } %>
       <% end %>
-      <%= button_to "Delete app", app_path(@app), method: :delete, class: "btn btn--danger",
-            form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } } %>
+      <% if can?(:delete, :apps) %>
+        <%= button_to "Delete app", app_path(@app), method: :delete, class: "btn btn--danger",
+              form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } } %>
+      <% end %>
     <% end %>
   </section>
 

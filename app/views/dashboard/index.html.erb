@@ -2,10 +2,12 @@
 
 <div class="page-head">
   <h1>Apps</h1>
-  <div class="head-actions">
-    <%= link_to "+ New app", new_app_path, class: "btn btn--primary" %>
-    <%= link_to "+ New repo", new_app_path(app_kind: "repo"), class: "btn" %>
-  </div>
+  <% if can?(:create, :apps) %>
+    <div class="head-actions">
+      <%= link_to "+ New app", new_app_path, class: "btn btn--primary" %>
+      <%= link_to "+ New repo", new_app_path(app_kind: "repo"), class: "btn" %>
+    </div>
+  <% end %>
 </div>
 
   <table class="apps">
@@ -37,7 +39,9 @@
             <% end %>
           </td>
           <td class="row-actions">
-            <%= button_to "Deploy", deploy_app_path(app), class: "btn btn--small" %>
+            <% if can?(:update, :apps) %>
+              <%= button_to "Deploy", deploy_app_path(app), class: "btn btn--small" %>
+            <% end %>
           </td>
         </tr>
       <% end %>

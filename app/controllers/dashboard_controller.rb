@@ -1,5 +1,7 @@
 class DashboardController < ApplicationController
   def index
+    return forbidden if cannot?(:read, :apps)
+
     @apps = App.order(:domain, :subdomain).to_a
 
     # Live status per app, checked concurrently with a short timeout so the

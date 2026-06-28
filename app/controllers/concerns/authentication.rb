@@ -1,9 +1,9 @@
 require "net/http"
 
-# SSO against login.ltvb.nl (same scheme every ltvb app uses), plus an admin
-# allowlist: this tool can create/destroy subdomains and run server commands, so
-# only explicitly-listed accounts may use it. Set ADMIN_EMAILS in .env (comma
-# separated). An empty allowlist denies everyone — fail closed.
+# SSO against login.ltvb.nl (same scheme every ltvb app uses). This tool can
+# create/destroy subdomains and run server commands, so access is gated on the
+# account's permissions for the `apps` area, delivered in the session JSON by
+# login (see Permission#for there). No permission = no access — fail closed.
 module Authentication
   extend ActiveSupport::Concern
 
@@ -14,12 +14,36 @@ module Authentication
 
   included do
     before_action :require_login
-    helper_method :current_account
+    helper_method :current_account, :can?, :cannot?
   end
 
   private
 
   attr_reader :current_account
+
+  # Permission tree login merged into the session JSON, e.g.
+  # { "apps" => ["read", "update", ...], "github" => { "repositories" => [...] } }.
+  # String keys/values, since it arrives as parsed JSON.
+  def current_permissions
+    current_account&.dig("permissions") || {}
+  end
+
+  # Is the current account allowed to perform `operation` on a permission area?
+  # Flat areas: can?(:update, :apps). Nested areas: can?(:read, :github, :repositories).
+  def can?(operation, *area)
+    node = current_permissions.dig(*area.map(&:to_s))
+    node.is_a?(Array) && node.include?(operation.to_s)
+  end
+
+  def cannot?(operation, *area)
+    !can?(operation, *area)
+  end
+
+  # Render the 403 page. Use as an inline guard at the top of an action:
+  #   return forbidden if cannot?(:read, :apps)
+  def forbidden
+    render "shared/forbidden", status: :forbidden
+  end
 
   def require_login
     token = auth_token
@@ -52,6 +76,8 @@ module Authentication
   end
 
   def store_auth_cookie(token)
+    cookies.delete(:auth_token, domain: :all)
+
     cookies[:auth_token] = {
       value: token,
       expires: AUTH_COOKIE_DURATION.from_now,

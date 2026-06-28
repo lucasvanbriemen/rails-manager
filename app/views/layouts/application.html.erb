@@ -23,7 +23,10 @@
   </head>
 
   <body>
-    <%= header(title: "Apps", items: [{name: "Dashboard", href: root_path, active: !current_page?(new_app_path) }, {name: "New app", href: new_app_path, active: current_page?(new_app_path)}]) %>
+    <%= header(title: "Apps", items: [
+      {name: "Dashboard", href: root_path, active: !current_page?(new_app_path)},
+      ({name: "New app", href: new_app_path, active: current_page?(new_app_path)} if can?(:create, :apps))
+    ].compact) %>
 
     <main class="container">
       <% if flash[:notice] %><div class="flash flash--notice"><%= flash[:notice] %></div><% end %>

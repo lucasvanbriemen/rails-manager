@@ -6,17 +6,23 @@ class AppsController < ApplicationController
   end
 
   def show
+    return forbidden if cannot?(:read, :apps)
+
     @status = AppStatusChecker.check(@app) if @app.rails_app?
     @deployments = @app.deployments.limit(20)
   end
 
   def new
+    return forbidden if cannot?(:create, :apps)
+
     @app = App.new(app_kind: params[:app_kind].presence || "rails",
                    ruby_version: "3.3.8", git_branch: "main",
                    source_mode: "git", primary_db_kind: "sqlite")
   end
 
   def create
+    return forbidden if cannot?(:create, :apps)
+
     @app = App.new(app_params)
     if @app.save
       deployment = @app.deployments.create!(kind: "create", triggered_by: admin_email)
@@ -27,9 +33,13 @@ class AppsController < ApplicationController
     end
   end
 
-  def edit; end
+  def edit
+    return forbidden if cannot?(:update, :apps)
+  end
 
   def update
+    return forbidden if cannot?(:update, :apps)
+
     if @app.update(app_params)
       redirect_to @app, notice: "Saved."
     else
@@ -38,6 +48,8 @@ class AppsController < ApplicationController
   end
 
   def destroy
+    return forbidden if cannot?(:delete, :apps)
+
     # A repo isn't a Plesk subdomain — just stop tracking it (checkout stays on disk).
     if @app.repo?
       label = @app.name
@@ -55,30 +67,40 @@ class AppsController < ApplicationController
   # --- member deploy actions ---
 
   def deploy
+    return forbidden if cannot?(:update, :apps)
+
     deployment = @app.deployments.create!(kind: "deploy", triggered_by: admin_email, ref: params[:ref].presence)
     enqueue(deployment)
     redirect_to app_deployment_path(@app, deployment), notice: "Deploying…"
   end
 
   def restart
+    return forbidden if cannot?(:update, :apps)
+
     deployment = @app.deployments.create!(kind: "restart", triggered_by: admin_email)
     enqueue(deployment, allow_upload: false)
     redirect_to app_deployment_path(@app, deployment), notice: "Restarting…"
   end
 
   def migrate_primary
+    return forbidden if cannot?(:update, :apps)
+
     deployment = @app.deployments.create!(kind: "migrate_primary", triggered_by: admin_email)
     enqueue(deployment, allow_upload: false)
     redirect_to app_deployment_path(@app, deployment), notice: "Migrating primary DB…"
   end
 
   def logs
+    return forbidden if cannot?(:read, :apps)
+
     @production_log = tail(File.join(@app.app_path, "log", "production.log"))
     @error_log      = tail(File.join(@app.webspace_root, "logs", @app.fqdn, "error_log"))
   end
 
   # Adopt an existing Plesk subdomain into the manager.
   def import
+    return forbidden if cannot?(:create, :apps)
+
     fqdn = params[:fqdn].to_s.strip
     subdomain, domain = fqdn.split(".", 2)
     app = App.new(name: fqdn, subdomain: subdomain, domain: domain,
