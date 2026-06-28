@@ -22,11 +22,6 @@ module Authentication
     helper_method :current_account, :can?, :cannot?, :logged_in?
   end
 
-  # Fail-closed session used when login is unreachable: no account, no
-  # permissions. (When login *is* reachable, an unauthenticated request still
-  # gets the BASE permission tree from its tokenless `/session/` fallback.)
-  ANONYMOUS_SESSION = { "isloggedin" => false, "permissions" => {} }.freeze
-
   private
 
   attr_reader :current_account
@@ -36,7 +31,7 @@ module Authentication
   # BASE session; login being unreachable yields the fail-closed session above.
   # current_account is therefore always a hash, so logged_in?/can? never crash.
   def load_account
-    @current_account = fetch_account(auth_token) || ANONYMOUS_SESSION
+    @current_account = fetch_account(auth_token)
 
     # Token arrived via the URL (login redirect); persist it as a cookie and
     # strip it from the URL so it isn't bookmarked or leaked in referrers.
@@ -71,14 +66,11 @@ module Authentication
     !can?(operation, *area)
   end
 
-  # Render the 403 page. Use as an inline guard at the top of an action:
-  #   return forbidden if cannot?(:read, :apps)
   def forbidden
-    unless logged_in?
-      return redirect_to "#{LOGIN_URL}?redirect=#{CGI.escape(request.original_url)}", allow_other_host: true
+    if logged_in?
+      return render "shared/forbidden", status: :forbidden
     end
-
-    render "shared/forbidden", status: :forbidden
+    redirect_to "#{LOGIN_URL}?redirect=#{CGI.escape(request.original_url)}", allow_other_host: true
   end
 
   def auth_token
