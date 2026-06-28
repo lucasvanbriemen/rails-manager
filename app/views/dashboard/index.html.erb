@@ -23,8 +23,6 @@
             <% if (d = app.last_deployment) %>
               <%= deployment_badge(d) %>
               <span class="muted"><%= time_ago_in_words(d.created_at) %> ago</span>
-            <% else %>
-              <span class="muted">never</span>
             <% end %>
       </div>
     <% end %>

@@ -1,7 +1,7 @@
 module ApplicationHelper
   STATUS_LABELS = {
     rails:       "Live",
-    redirect:    "Live (SSO)",
+    redirect:    "Live",
     placeholder: "Placeholder!",
     error5xx:    "5xx error",
     down:        "Down",
