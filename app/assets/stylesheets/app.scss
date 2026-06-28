@@ -23,6 +23,11 @@
       color: var(--primary);
       text-decoration: underline;
     }
+
+    .end-point {
+      color: var(--secondary);
+      word-break: break-all;
+    }
   }
 }
 

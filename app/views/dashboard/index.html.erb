@@ -10,15 +10,12 @@
   <div class="apps-wrapper">
     <% @apps.each do |app| %>
       <div class="app">
-            <%= link_to app.name, app_path(app), class: "title" %>
-            <div class="muted">
-              <% if app.repo? %>
-                <span><%= app.deploy_path %></span>
-              <% else %>
-                <a href="<%= app.url %>" target="_blank" rel="noopener"><%= app.fqdn %></a>
-              <% end %>
-            </div>
-          </td>
+        <%= link_to app.name, app_path(app), class: "title" %>
+        <% if app.repo? %>
+          <span class="end-point"><%= app.deploy_path %></span>
+        <% else %>
+          <a href="<%= app.url %>" target="_blank" rel="noopener" class="end-point"><%= app.fqdn %></a>
+        <% end %>
           <td><%= status_badge(@statuses[app.id] || { status: :unknown }) %></td>
           <td><%= app.repo? ? "—" : content_tag(:code, app.ruby_version) %></td>
           <td><span class="muted"><%= app.git_branch %></span></td>
