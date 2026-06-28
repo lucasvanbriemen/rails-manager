@@ -1,29 +1,26 @@
 <% content_for :title, "Apps" %>
 
-<div class="page-head">
-  <h1>Apps</h1>
-  <% if can?(:create, :apps) %>
-    <%= button(text: "+ New app", href: new_app_path) %>
+<div class="apps-wrapper">
+  <% @apps.each do |app| %>
+    <div class="app">
+      <%= link_to app.name, app_path(app), class: "title" %>
+      <% if app.repo? %>
+        <span class="end-point"><%= app.deploy_path %></span>
+      <% else %>
+        <a href="<%= app.url %>" target="_blank" rel="noopener" class="end-point"><%= app.fqdn %></a>
+      <% end %>
+        <td><%= status_badge(@statuses[app.id] || { status: :unknown }) %></td>
+        <td><%= app.repo? ? "—" : content_tag(:code, app.ruby_version) %></td>
+        <td><span class="muted"><%= app.git_branch %></span></td>
+        <td>
+          <% if (d = app.last_deployment) %>
+            <%= deployment_badge(d) %>
+            <span class="muted"><%= time_ago_in_words(d.created_at) %> ago</span>
+          <% end %>
+    </div>
   <% end %>
 </div>
 
-  <div class="apps-wrapper">
-    <% @apps.each do |app| %>
-      <div class="app">
-        <%= link_to app.name, app_path(app), class: "title" %>
-        <% if app.repo? %>
-          <span class="end-point"><%= app.deploy_path %></span>
-        <% else %>
-          <a href="<%= app.url %>" target="_blank" rel="noopener" class="end-point"><%= app.fqdn %></a>
-        <% end %>
-          <td><%= status_badge(@statuses[app.id] || { status: :unknown }) %></td>
-          <td><%= app.repo? ? "—" : content_tag(:code, app.ruby_version) %></td>
-          <td><span class="muted"><%= app.git_branch %></span></td>
-          <td>
-            <% if (d = app.last_deployment) %>
-              <%= deployment_badge(d) %>
-              <span class="muted"><%= time_ago_in_words(d.created_at) %> ago</span>
-            <% end %>
-      </div>
-    <% end %>
-  </div>
+<% if can?(:create, :apps) %>
+  <%= button(text: "New app" , href: new_app_path) %>
+<% end %>
