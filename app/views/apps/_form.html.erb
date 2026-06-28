@@ -5,6 +5,10 @@
     </div>
   <% end %>
 
+  <a href="<%= new_app_path(app_kind: app.repo? ? "app" : "repo") %>" class="btn btn--small btn--secondary">
+    Switch to <%= app.repo? ? "Rails app" : "Repo" %>
+  </a>
+
   <%= f.hidden_field :app_kind %>
   <p class="hint">
     Type: <strong><%= app.repo? ? "Repo (git pull + commands)" : "Rails app (Plesk subdomain)" %></strong>
