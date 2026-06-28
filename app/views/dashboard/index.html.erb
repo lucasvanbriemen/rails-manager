@@ -3,10 +3,7 @@
 <div class="page-head">
   <h1>Apps</h1>
   <% if can?(:create, :apps) %>
-    <div class="head-actions">
-      <%= link_to "+ New app", new_app_path, class: "btn btn--primary" %>
-      <%= link_to "+ New repo", new_app_path(app_kind: "repo"), class: "btn" %>
-    </div>
+    <%= button(text: "+ New app", href: new_app_path) %>
   <% end %>
 </div>
 

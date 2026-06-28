@@ -35,7 +35,7 @@ code, .mono, pre { font-family: "SF Mono", ui-monospace, Menlo, Consolas, monosp
   margin-bottom: 1.25rem;
   h1 { margin: 0; font-size: 1.4rem; }
 }
-.head-actions, .row-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.row-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .muted { color: var(--muted); font-size: 0.85rem; }
 .hint  { color: var(--muted); font-size: 0.8rem; margin: 0.25rem 0 0.75rem; }
