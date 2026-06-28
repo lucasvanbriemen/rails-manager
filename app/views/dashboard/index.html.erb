@@ -7,11 +7,7 @@
   <% end %>
 </div>
 
-  <table class="apps">
-    <thead>
-      <tr><th>App</th><th>Status</th><th>Ruby</th><th>Source</th><th>Last deploy</th><th></th></tr>
-    </thead>
-    <tbody>
+  <div class="apps-wrapper">
       <% @apps.each do |app| %>
         <tr>
           <td>
@@ -43,4 +39,4 @@
         </tr>
       <% end %>
     </tbody>
-  </table>
+  </div>
