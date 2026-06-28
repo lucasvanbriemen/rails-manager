@@ -41,7 +41,6 @@
     <%= f.text_field :ruby_version, placeholder: "3.3.8", label: "Ruby version" %>
 
     <div class="form-row">
-      <label><span>Source mode</span><%= f.select :source_mode, App::SOURCE_MODES %></label>
       <label><span>Primary DB</span><%= f.select :primary_db_kind, App::PRIMARY_DB_KINDS %></label>
     </div>
     <p class="hint">Choose <code>external</code> if the primary DB is a shared/remote DB (e.g. MySQL). The deploy will never auto-migrate it.</p>

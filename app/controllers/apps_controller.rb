@@ -17,7 +17,7 @@ class AppsController < ApplicationController
 
     @app = App.new(app_kind: params[:app_kind].presence || "rails",
                    ruby_version: "3.3.8", git_branch: "main",
-                   source_mode: "git", primary_db_kind: "sqlite")
+                   primary_db_kind: "sqlite")
   end
 
   def create
@@ -131,7 +131,7 @@ class AppsController < ApplicationController
 
   def app_params
     params.require(:app).permit(
-      :name, :app_kind, :subdomain, :domain, :ruby_version, :source_mode,
+      :name, :app_kind, :subdomain, :domain, :ruby_version,
       :git_repo_url, :git_branch, :primary_db_kind, :notes,
       :deploy_path, :post_deploy_commands,
       :master_key, :env_text

@@ -1,6 +1,5 @@
 class App < ApplicationRecord
   APP_KINDS = %w[rails repo].freeze
-  SOURCE_MODES = %w[git upload].freeze
   PRIMARY_DB_KINDS = %w[sqlite external].freeze
 
   has_many :deployments, -> { order(created_at: :desc) }, dependent: :destroy
@@ -12,7 +11,6 @@ class App < ApplicationRecord
 
   validates :name, presence: true
   validates :app_kind, inclusion: { in: APP_KINDS }
-  validates :source_mode, inclusion: { in: SOURCE_MODES }
   validates :primary_db_kind, inclusion: { in: PRIMARY_DB_KINDS }
   validates :git_repo_url, presence: true, if: :git?
 
@@ -28,8 +26,6 @@ class App < ApplicationRecord
   # Repos live at a custom path and are git-only (nothing to upload-build).
   with_options if: :repo? do
     validates :deploy_path, presence: true
-    validates :source_mode, inclusion: { in: %w[git],
-                                         message: "must be git for a repo" }
   end
 
   normalizes :subdomain, :domain, with: ->(v) { v.to_s.strip.downcase.presence }

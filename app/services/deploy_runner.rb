@@ -108,7 +108,7 @@ class DeployRunner
   end
 
   def fetch_code!
-    log "\n--- fetch code (#{@app.source_mode}) ---\n"
+    log "\n--- fetch code for git ---\n"
     git_sync!
     record_git_ref!
   end

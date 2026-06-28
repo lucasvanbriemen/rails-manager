@@ -10,13 +10,12 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_06_22_190003) do
+ActiveRecord::Schema[8.0].define(version: 2026_06_28_134917) do
   create_table "apps", force: :cascade do |t|
     t.string "name", null: false
     t.string "subdomain"
     t.string "domain"
     t.string "ruby_version", default: "3.3.8", null: false
-    t.string "source_mode", default: "git", null: false
     t.string "git_repo_url"
     t.string "git_branch", default: "main", null: false
     t.string "primary_db_kind", default: "sqlite", null: false
