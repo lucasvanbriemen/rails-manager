@@ -1,9 +1,14 @@
 require "net/http"
 
 # SSO against login.ltvb.nl (same scheme every ltvb app uses). This tool can
-# create/destroy subdomains and run server commands, so access is gated on the
-# account's permissions for the `apps` area, delivered in the session JSON by
-# login (see Permission#for there). No permission = no access — fail closed.
+# create/destroy subdomains and run server commands, so every privileged action
+# is gated on the account's permissions for the `apps` area, delivered in the
+# session JSON by login (see Permission#for there).
+#
+# Visitors are never blocked at the door: an unauthenticated request resolves to
+# login's anonymous session (the BASE permission tree), so public read-only pages
+# still render. Actions guard themselves with `cannot?(...)`, which bounces an
+# anonymous visitor to login and 403s a logged-in account that lacks the right.
 module Authentication
   extend ActiveSupport::Concern
 
@@ -13,13 +18,20 @@ module Authentication
   AUTH_COOKIE_DURATION = 1.week
 
   included do
-    before_action :require_login
-    helper_method :current_account, :can?, :cannot?
+    before_action :load_account
+    helper_method :current_account, :can?, :cannot?, :logged_in?
   end
 
   private
 
   attr_reader :current_account
+
+  # A real account is one backed by a login session. An anonymous session
+  # (login's tokenless fallback, or login being unreachable) carries the BASE
+  # permission tree but no account — so callers can still offer a read-only view.
+  def logged_in?
+    current_account["isloggedin"]
+  end
 
   # Permission tree login merged into the session JSON, e.g.
   # { "apps" => ["read", "update", ...], "github" => { "repositories" => [...] } }.
@@ -42,14 +54,7 @@ module Authentication
   # Render the 403 page. Use as an inline guard at the top of an action:
   #   return forbidden if cannot?(:read, :apps)
   def forbidden
-    render "shared/forbidden", status: :forbidden
-  end
-
-  def require_login
-    token = auth_token
-    @current_account = fetch_account(token) if token.present?
-
-    if @current_account.nil?
+    unless logged_in?
       return redirect_to "#{LOGIN_URL}?redirect=#{CGI.escape(request.original_url)}", allow_other_host: true
     end
 
