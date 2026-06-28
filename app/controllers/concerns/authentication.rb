@@ -26,15 +26,9 @@ module Authentication
 
   attr_reader :current_account
 
-  # Resolve the request's account once, before every action. A valid token
-  # yields the real account; a missing/invalid token yields login's anonymous
-  # BASE session; login being unreachable yields the fail-closed session above.
-  # current_account is therefore always a hash, so can? never crash.
   def load_account
     @current_account = fetch_account(auth_token)
 
-    # Token arrived via the URL (login redirect); persist it as a cookie and
-    # strip it from the URL so it isn't bookmarked or leaked in referrers.
     if params[:auth_token].present?
       store_auth_cookie(params[:auth_token])
       redirect_to clean_url
