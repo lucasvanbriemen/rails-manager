@@ -10,7 +10,7 @@
   <div class="apps-wrapper">
     <% @apps.each do |app| %>
       <div class="app">
-            <%= link_to app.name, app_path(app), class: "apps__name" %>
+            <%= link_to app.name, app_path(app), class: "title" %>
             <div class="muted">
               <% if app.repo? %>
                 <span><%= app.deploy_path %></span>

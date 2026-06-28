@@ -4,14 +4,24 @@
   gap: 1.25rem;
 
   .app {
-    width: calc(25% - 1.25rem);
+    width: calc(33% - 1.25rem);
     background: var(--surface-at-1);
     border: 1px solid var(--outline-variant);
     padding: 1rem;
     border-radius: 1rem;
+    display: flex;
+    flex-direction: column;
 
     @media (max-width: 768px) {
       width: 100%;
+    }
+
+    .title {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: var(--primary);
+      text-decoration: underline;
     }
   }
 }
