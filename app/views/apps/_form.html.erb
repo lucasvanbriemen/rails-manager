@@ -52,14 +52,6 @@
       <label><span>Branch</span><%= f.text_field :git_branch, label: false, placeholder: "main" %></label>
     </fieldset>
 
-    <% if app.upload? || app.new_record? %>
-      <fieldset>
-        <legend>Upload source (tar.gz)</legend>
-        <label><span>Tarball</span><%= file_field_tag :tarball, accept: ".gz,.tgz,.tar.gz" %></label>
-        <p class="hint">Only used when source mode is <code>upload</code>. Provide on create or each deploy.</p>
-      </fieldset>
-    <% end %>
-
     <label><span>config/master.key</span><%= f.text_area :master_key, rows: 1, class: "mono", placeholder: "32-char hex (leave blank if app needs no credentials)" %></label>
 
     <label><span>.env</span><%= f.text_area :env_text, rows: 6, class: "mono", placeholder: "DB_HOST=...\nDB_DATABASE=..." %></label>

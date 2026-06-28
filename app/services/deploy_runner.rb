@@ -7,15 +7,14 @@ require "bundler"
 # the `ltvb` user (the manager's own Passenger process), shelling out with the
 # *target app's* rbenv environment — never the manager's bundler context.
 #
-#   DeployRunner.new(deployment, ref: nil, upload_tarball: nil).call
+#   DeployRunner.new(deployment, ref: nil).call
 class DeployRunner
   class StepFailed < StandardError; end
 
-  def initialize(deployment, ref: nil, upload_tarball: nil)
+  def initialize(deployment, ref: nil)
     @deployment     = deployment
     @app            = deployment.app
     @ref            = ref
-    @upload_tarball = upload_tarball
   end
 
   def call
@@ -110,7 +109,7 @@ class DeployRunner
 
   def fetch_code!
     log "\n--- fetch code (#{@app.source_mode}) ---\n"
-    @app.upload? ? unpack_upload! : git_sync!
+    git_sync!
     record_git_ref!
   end
 
@@ -140,21 +139,6 @@ class DeployRunner
   # git's "dubious ownership" abort without touching any user's global gitconfig.
   def git!(*args)
     run! "git", "-c", "safe.directory=#{@app.app_path}", "-C", @app.app_path, *args
-  end
-
-  def unpack_upload!
-    if @upload_tarball.present? && File.exist?(@upload_tarball)
-      FileUtils.mkdir_p(@app.app_path)
-      run! "tar", "xzf", @upload_tarball, "-C", @app.app_path
-      @deployment.update!(ref: "upload")
-    elsif File.exist?(File.join(@app.app_path, "config.ru")) || File.exist?(File.join(@app.app_path, "Gemfile"))
-      # No tarball, but code is already on disk (e.g. an imported app) — just
-      # rebuild and restart in place rather than failing.
-      log "no upload provided — rebuilding the code already on disk in place\n"
-      @deployment.update!(ref: "in-place")
-    else
-      raise StepFailed, "no upload provided and no existing code at #{@app.app_path}"
-    end
   end
 
   # Plesk seeds a new docroot with its "Domain Default page" index.html. With

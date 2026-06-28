@@ -79,7 +79,6 @@ class App < ApplicationRecord
   def rails_app? = app_kind == "rails"
   def repo?      = app_kind == "repo"
   def git?    = source_mode == "git"
-  def upload? = source_mode == "upload"
   def external_primary? = primary_db_kind == "external"
 
   # Follow-up shell commands for a repo: one per non-blank, non-comment line.

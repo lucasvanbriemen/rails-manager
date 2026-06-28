@@ -4,9 +4,6 @@ Rails.application.routes.draw do
 
   root to: "dashboard#index"
 
-  # Adopt existing Plesk subdomains that aren't tracked yet.
-  post "import", to: "apps#import", as: :import_apps
-
   resources :apps do
     member do
       post :deploy        # git pull / unpack upload, then build + restart

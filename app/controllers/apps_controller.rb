@@ -34,7 +34,7 @@ class AppsController < ApplicationController
   end
 
   def edit
-    return forbidden if cannot?(:update, :apps)
+    forbidden if cannot?(:update, :apps)
   end
 
   def update
@@ -97,22 +97,6 @@ class AppsController < ApplicationController
     @error_log      = tail(File.join(@app.webspace_root, "logs", @app.fqdn, "error_log"))
   end
 
-  # Adopt an existing Plesk subdomain into the manager.
-  def import
-    return forbidden if cannot?(:create, :apps)
-
-    fqdn = params[:fqdn].to_s.strip
-    subdomain, domain = fqdn.split(".", 2)
-    app = App.new(name: fqdn, subdomain: subdomain, domain: domain,
-                  source_mode: "upload", git_branch: "main", primary_db_kind: "sqlite",
-                  ruby_version: "3.3.8")
-    if app.save
-      redirect_to edit_app_path(app), notice: "Imported #{fqdn} — review its settings and secrets."
-    else
-      redirect_to root_path, alert: "Could not import #{fqdn}: #{app.errors.full_messages.to_sentence}"
-    end
-  end
-
   private
 
   def set_app
@@ -124,8 +108,7 @@ class AppsController < ApplicationController
   end
 
   def enqueue(deployment, allow_upload: true)
-    tarball = save_upload if allow_upload && @app.upload? && params[:tarball].present?
-    DeployJob.perform_later(deployment.id, ref: deployment.ref, upload_tarball: tarball)
+    DeployJob.perform_later(deployment.id, ref: deployment.ref)
   end
 
   def save_upload
