@@ -64,9 +64,7 @@ module Authentication
   end
 
   def auth_token
-    params[:auth_token].presence ||
-      cookies[:auth_token].presence ||
-      request.headers["Authorization"].to_s[/\ABearer (.+)\z/, 1]
+    params[:auth_token].presence || cookies[:auth_token].presence || request.headers["Authorization"].to_s[/\ABearer (.+)\z/, 1]
   end
 
   def fetch_account(token)
