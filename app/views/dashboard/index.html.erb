@@ -8,8 +8,8 @@
 </div>
 
   <div class="apps-wrapper">
-      <% @apps.each do |app| %>
-        <tr>
+    <% @apps.each do |app| %>
+      <div class="app">
           <td>
             <%= link_to app.name, app_path(app), class: "apps__name" %>
             <div class="muted">
@@ -31,12 +31,6 @@
               <span class="muted">never</span>
             <% end %>
           </td>
-          <td class="row-actions">
-            <% if can?(:update, :apps) %>
-              <%= button_to "Deploy", deploy_app_path(app), class: "btn btn--small" %>
-            <% end %>
-          </td>
-        </tr>
-      <% end %>
-    </tbody>
+      </div>
+    <% end %>
   </div>
