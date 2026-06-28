@@ -1,14 +1,5 @@
 require "net/http"
 
-# SSO against login.ltvb.nl (same scheme every ltvb app uses). This tool can
-# create/destroy subdomains and run server commands, so every privileged action
-# is gated on the account's permissions for the `apps` area, delivered in the
-# session JSON by login (see Permission#for there).
-#
-# Visitors are never blocked at the door: an unauthenticated request resolves to
-# login's anonymous session (the BASE permission tree), so public read-only pages
-# still render. Actions guard themselves with `cannot?(...)`, which bounces an
-# anonymous visitor to login and 403s a logged-in account that lacks the right.
 module Authentication
   extend ActiveSupport::Concern
 
