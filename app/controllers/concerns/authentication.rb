@@ -19,7 +19,7 @@ module Authentication
 
   included do
     before_action :load_account
-    helper_method :current_account, :can?, :cannot?, :logged_in?
+    helper_method :current_account, :can?, :cannot?
   end
 
   private
@@ -29,7 +29,7 @@ module Authentication
   # Resolve the request's account once, before every action. A valid token
   # yields the real account; a missing/invalid token yields login's anonymous
   # BASE session; login being unreachable yields the fail-closed session above.
-  # current_account is therefore always a hash, so logged_in?/can? never crash.
+  # current_account is therefore always a hash, so can? never crash.
   def load_account
     @current_account = fetch_account(auth_token)
 
@@ -39,13 +39,6 @@ module Authentication
       store_auth_cookie(params[:auth_token])
       redirect_to clean_url
     end
-  end
-
-  # A real account is one backed by a login session. An anonymous session
-  # (login's tokenless fallback, or login being unreachable) carries the BASE
-  # permission tree but no account — so callers can still offer a read-only view.
-  def logged_in?
-    current_account["isloggedin"]
   end
 
   # Permission tree login merged into the session JSON, e.g.
@@ -67,9 +60,6 @@ module Authentication
   end
 
   def forbidden
-    if logged_in?
-      return render "shared/forbidden", status: :forbidden
-    end
     redirect_to "#{LOGIN_URL}?redirect=#{CGI.escape(request.original_url)}", allow_other_host: true
   end
 
