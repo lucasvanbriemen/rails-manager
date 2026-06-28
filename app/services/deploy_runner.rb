@@ -155,8 +155,6 @@ class DeployRunner
   end
 
   def record_git_ref!
-    return unless @app.git?
-
     out, _e, st = capture("git", "-c", "safe.directory=#{@app.app_path}", "-C", @app.app_path, "rev-parse", "HEAD")
     @deployment.update!(ref: out.strip) if st&.success?
   end

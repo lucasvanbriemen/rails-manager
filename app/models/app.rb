@@ -12,7 +12,7 @@ class App < ApplicationRecord
   validates :name, presence: true
   validates :app_kind, inclusion: { in: APP_KINDS }
   validates :primary_db_kind, inclusion: { in: PRIMARY_DB_KINDS }
-  validates :git_repo_url, presence: true, if: :git?
+  validates :git_repo_url, presence: true
 
   # Rails (Plesk subdomain) apps need a subdomain/domain/ruby; repos don't.
   with_options if: :rails_app? do
@@ -74,7 +74,6 @@ class App < ApplicationRecord
 
   def rails_app? = app_kind == "rails"
   def repo?      = app_kind == "repo"
-  def git?    = source_mode == "git"
   def external_primary? = primary_db_kind == "external"
 
   # Follow-up shell commands for a repo: one per non-blank, non-comment line.

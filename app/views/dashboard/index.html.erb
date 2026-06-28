@@ -26,7 +26,7 @@
           </td>
           <td><%= status_badge(@statuses[app.id] || { status: :unknown }) %></td>
           <td><%= app.repo? ? "—" : content_tag(:code, app.ruby_version) %></td>
-          <td><% if app.git? %> <span class="muted"><%= app.git_branch %></span><% end %></td>
+          <td><span class="muted"><%= app.git_branch %></span></td>
           <td>
             <% if (d = app.last_deployment) %>
               <%= deployment_badge(d) %>

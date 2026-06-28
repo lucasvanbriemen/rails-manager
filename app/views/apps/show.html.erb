@@ -54,7 +54,7 @@
         <dt>Path</dt><dd class="mono"><%= @app.app_path %></dd>
         <dt>Document root</dt><dd class="mono"><%= @app.public_path %></dd>
         <dt>Ruby</dt><dd><code><%= @app.ruby_version %></code></dd>
-        <dt>Source</dt><dd><% if @app.git? %> — <%= @app.git_repo_url %> (<%= @app.git_branch %>)<% end %></dd>
+        <dt>Source</dt><dd><%= @app.git_repo_url %> (<%= @app.git_branch %>)</dd>
         <dt>Primary DB</dt><dd><%= @app.primary_db_kind %></dd>
         <dt>master.key</dt><dd><%= @app.master_key.present? ? "set" : "—" %></dd>
         <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
