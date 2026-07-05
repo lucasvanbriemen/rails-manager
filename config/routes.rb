@@ -8,7 +8,6 @@ Rails.application.routes.draw do
     member do
       post :deploy        # git pull / unpack upload, then build + restart
       post :restart       # touch tmp/restart.txt
-      post :migrate_primary # explicit, guarded migration of an external primary DB
       get  :logs          # tail production.log + apache error_log
     end
     resources :deployments, only: [ :show ]

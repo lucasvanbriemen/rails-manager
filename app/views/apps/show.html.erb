@@ -59,10 +59,6 @@
         <dt>master.key</dt><dd><%= @app.master_key.present? ? "set" : "—" %></dd>
         <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
       </dl>
-      <% if @app.external_primary? && can?(:update, :apps) %>
-        <%= button_to "Migrate primary DB", migrate_primary_app_path(@app), class: "btn btn--warn",
-              form: { data: { turbo_confirm: "Run migrations against the EXTERNAL/shared primary DB for #{@app.fqdn}?" } } %>
-      <% end %>
       <% if can?(:delete, :apps) %>
         <%= button_to "Delete app", app_path(@app), method: :delete, class: "btn btn--danger",
               form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } } %>

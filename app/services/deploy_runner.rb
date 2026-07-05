@@ -32,7 +32,6 @@ class DeployRunner
       when "create"          then provision!; deploy!
       when "deploy"          then deploy!
       when "restart"         then restart!; verify!
-      when "migrate_primary" then migrate_primary!
       when "destroy"         then destroy!
       else raise StepFailed, "unknown kind #{@deployment.kind}"
       end
@@ -193,14 +192,7 @@ class DeployRunner
 
   def prepare_databases!
     log "\n--- prepare databases ---\n"
-    if @app.external_primary?
-      log "primary DB is external/shared — NOT migrating it (use the guarded action). Secondary DBs only.\n"
-      %w[cache queue cable].each do |db|
-        run! "bundle", "exec", "rails", "db:create:#{db}", "db:migrate:#{db}"
-      end
-    else
-      run! "bundle", "exec", "rails", "db:prepare"
-    end
+    run! "bundle", "exec", "rails", "db:prepare"
   end
 
   def precompile_assets!
@@ -214,12 +206,6 @@ class DeployRunner
     FileUtils.mkdir_p(tmp)
     FileUtils.touch(File.join(tmp, "restart.txt"))
     log "touched tmp/restart.txt\n"
-  end
-
-  def migrate_primary!
-    log "\n--- migrate primary DB (explicit) ---\n"
-    run! "bundle", "exec", "rails", "db:migrate:status:primary"
-    run! "bundle", "exec", "rails", "db:migrate:primary"
   end
 
   def destroy!

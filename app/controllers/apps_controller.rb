@@ -1,5 +1,5 @@
 class AppsController < ApplicationController
-  before_action :set_app, only: %i[show edit update destroy deploy restart migrate_primary logs]
+  before_action :set_app, only: %i[show edit update destroy deploy restart logs]
 
   def index
     redirect_to root_path
@@ -80,14 +80,6 @@ class AppsController < ApplicationController
     deployment = @app.deployments.create!(kind: "restart", triggered_by: admin_email)
     enqueue(deployment, allow_upload: false)
     redirect_to app_deployment_path(@app, deployment), notice: "Restarting…"
-  end
-
-  def migrate_primary
-    return forbidden if cannot?(:update, :apps)
-
-    deployment = @app.deployments.create!(kind: "migrate_primary", triggered_by: admin_email)
-    enqueue(deployment, allow_upload: false)
-    redirect_to app_deployment_path(@app, deployment), notice: "Migrating primary DB…"
   end
 
   def logs
