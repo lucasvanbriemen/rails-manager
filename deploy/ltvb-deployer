@@ -120,7 +120,18 @@ case "$verb" in
     plesk bin subdomain --remove "$sub" -domain "$parent"
     ;;
 
+  restart-jobs)
+    # Reload the Solid Queue worker so freshly-deployed manager code takes effect.
+    # The caller is itself a job running INSIDE this service, so --no-block is
+    # mandatory: it queues the restart and returns immediately, letting Solid
+    # Queue finish the in-flight deploy and shut down gracefully before systemd
+    # starts a new worker on the new code. A blocking restart would wait on the
+    # worker that is waiting on this command — a deadlock until SIGKILL.
+    require_args 0 "$#"
+    systemctl restart --no-block ltvb-apps-jobs
+    ;;
+
   *)
-    die "unknown verb: ${verb:-<none>} (allowed: list-domains create-subdomain set-docroot enable-ruby reconfigure remove-subdomain)"
+    die "unknown verb: ${verb:-<none>} (allowed: list-domains create-subdomain set-docroot enable-ruby reconfigure remove-subdomain restart-jobs)"
     ;;
 esac

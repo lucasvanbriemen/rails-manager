@@ -55,6 +55,13 @@ The manager tracks two kinds of "app":
   shape, domain allowlist, no `..`) — it is the trust boundary.
 - Deploys run as **Solid Queue** jobs (`deploy/ltvb-apps-jobs.service`); the live
   log view polls a JSON endpoint (no websocket dependency under Passenger).
+- **Self-deploy restarts the worker.** When the app being deployed is the manager
+  itself (its checkout == `Rails.root`), the final step calls the wrapper's
+  `restart-jobs` verb (`systemctl restart --no-block ltvb-apps-jobs`). Touching
+  `tmp/restart.txt` only reloads the Passenger web process; the long-lived Solid
+  Queue worker keeps the old job code until its service restarts. `--no-block`
+  lets this job finish and Solid Queue shut down gracefully before systemd starts
+  a worker on the new code.
 - Access is gated by the ltvb SSO (`login.ltvb.nl`) **and** an admin allowlist
   (`ADMIN_EMAILS` in `.env`) — fails closed.
 

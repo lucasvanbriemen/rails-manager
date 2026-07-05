@@ -37,6 +37,8 @@ class DeployRunner
       end
     end
 
+    restart_jobs_worker! if manager_self_deploy? && @deployment.kind != "destroy"
+
     @deployment.finish!(true)
     log "\n== success ==\n"
     true
@@ -221,6 +223,32 @@ class DeployRunner
     FileUtils.mkdir_p(tmp)
     FileUtils.touch(File.join(tmp, "restart.txt"))
     log "touched tmp/restart.txt\n"
+  end
+
+  # True when the app being deployed is the manager itself — its checkout is the
+  # very directory this runner boots from. Touching tmp/restart.txt reloads the
+  # Passenger *web* process, but the Solid Queue worker (where this job runs) is a
+  # separate long-lived process still holding the OLD code, so it needs an
+  # explicit service restart to pick up what we just deployed.
+  def manager_self_deploy?
+    File.expand_path(@app.app_path) == File.expand_path(Rails.root.to_s)
+  end
+
+  # Restart the Solid Queue service via the privileged wrapper. The wrapper uses
+  # `systemctl restart --no-block`, so this returns at once and Solid Queue can
+  # finish this job and shut down gracefully before systemd swaps in a worker on
+  # the new code — no self-inflicted SIGKILL, and the job isn't re-run. Non-fatal:
+  # the deploy already verified healthy, so a reload hiccup is a warning, not a
+  # failure (fall back to a manual `systemctl restart ltvb-apps-jobs`).
+  def restart_jobs_worker!
+    log "\n--- restart jobs worker (manager self-deploy) ---\n"
+    res = PrivilegedShell.run("restart-jobs")
+    if res.ok
+      log "queued ltvb-apps-jobs restart — the new worker will load the deployed code\n"
+    else
+      log "WARN: could not restart jobs worker (#{res.err.presence || 'failed'}); " \
+          "run `systemctl restart ltvb-apps-jobs` manually\n"
+    end
   end
 
   def destroy!
