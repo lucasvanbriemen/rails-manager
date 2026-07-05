@@ -119,7 +119,7 @@ class DeployRunner
     target = @ref.presence || "origin/#{@app.git_branch}"
 
     if Dir.exist?(File.join(@app.app_path, ".git"))
-      git! "remote", "set-url", "origin", @app.git_repo_url
+      set_origin!
     else
       log "initializing git checkout in #{@app.app_path}\n" unless Dir.exist?(@app.app_path)
       log "adopting existing directory as a git checkout\n" if Dir.exist?(@app.app_path)
@@ -130,6 +130,21 @@ class DeployRunner
 
     git! "fetch", "--prune", "origin"
     git! "reset", "--hard", target
+  end
+
+  # Point origin at the configured URL. An existing .git may have been created by
+  # `git init` without a remote (or with a differently-named one), so add origin
+  # when it's missing rather than assuming `set-url` will find it.
+  def set_origin!
+    if git_remotes.include?("origin")
+      git! "remote", "set-url", "origin", @app.git_repo_url
+    else
+      git! "remote", "add", "origin", @app.git_repo_url
+    end
+  end
+
+  def git_remotes
+    capture("git", "-c", "safe.directory=#{@app.app_path}", "-C", @app.app_path, "remote").first.to_s.split
   end
 
   # Run git against the app's on-disk checkout. The checkout may have been
