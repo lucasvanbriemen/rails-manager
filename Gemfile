@@ -60,3 +60,8 @@ group :test do
   gem "capybara"
   gem "selenium-webdriver"
 end
+
+# Pin stringio to the Ruby 3.3.8 default. Passenger pre-activates the default
+# gem before Bundler runs, so a newer stringio in the lock fails app boot with
+# "You have already activated stringio 3.1.1" (Gem::LoadError).
+gem "stringio", "3.1.1"

@@ -43,7 +43,7 @@
         </dd>
       </dl>
       <% if can?(:delete, :apps) %>
-        <%= button(text: "Stop managing", href: app_path(@app), method: :delete, form: { data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } }) %>
+        <%= button(text: "Stop managing", href: app_path(@app), method: :delete, form: { data: { turboclaud_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } }) %>
       <% end %>
     <% else %>
       <dl class="kv">
