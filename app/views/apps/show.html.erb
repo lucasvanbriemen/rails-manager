@@ -13,16 +13,13 @@
   </div>
   <div class="head-actions">
     <% if can?(:update, :apps) %>
-      <%= button_to "Deploy", deploy_app_path(@app), class: "btn btn--primary" %>
-    <% end %>
-    <% unless @app.repo? %>
-      <% if can?(:update, :apps) %>
-        <%= button_to "Restart", restart_app_path(@app), class: "btn" %>
+      <%= button(text: "Deploy", href: deploy_app_path(@app), method: :post) %>
+      <% unless @app.repo? %>
+        <%= button(text: "Restart", href: restart_app_path(@app), method: :post) %>
+        <%= button(text: "Logs", href: logs_app_path(@app))%>
       <% end %>
-      <%= link_to "Logs", logs_app_path(@app), class: "btn" %>
-    <% end %>
-    <% if can?(:update, :apps) %>
-      <%= link_to "Edit", edit_app_path(@app), class: "btn" %>
+
+      <%= button(text: "Edit", href: edit_app_path(@app)) %>
     <% end %>
   </div>
 </div>
