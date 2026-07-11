@@ -17,7 +17,7 @@ class AppsController < ApplicationController
 
     @app = App.new(app_kind: params[:app_kind].presence || "rails",
                    ruby_version: "3.3.8", git_branch: "main",
-                   primary_db_kind: "sqlite")
+                   primary_db_kind: "external")
   end
 
   def create
