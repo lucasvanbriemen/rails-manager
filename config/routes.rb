@@ -7,8 +7,22 @@ Rails.application.routes.draw do
   resources :apps do
     member do
       post :deploy        # git pull / unpack upload, then build + restart
-      get  :logs          # tail production.log + apache error_log
+      get  :logs          # browse/tail the app's log files
     end
     resources :deployments, only: [ :show ]
+    resources :exception_groups, only: [ :index, :show ], path: "exceptions" do
+      member do
+        post :resolve
+        post :reopen
+      end
+    end
+    resources :console_sessions, only: [ :create, :show, :destroy ] do
+      post :input, on: :member
+    end
+  end
+
+  # Managed apps POST uncaught exceptions here (per-app ingest token).
+  namespace :api do
+    resources :exceptions, only: [ :create ]
   end
 end

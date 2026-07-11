@@ -7,6 +7,7 @@ class DashboardController < ApplicationController
     # Live status per app, checked concurrently with a short timeout so the
     # dashboard stays snappy even when an app is down.
     @statuses = check_all(@apps)
+    @open_exceptions = ExceptionGroup.open_status.group(:app_id).count
   end
 
   private

@@ -1,0 +1,46 @@
+<% content_for :title, "#{@group.exception_class} · #{@app.name}" %>
+
+<div class="page-head">
+  <div>
+    <h1 class="mono"><%= @group.exception_class %></h1>
+    <div class="muted">
+      <span class="badge badge--exc-<%= @group.status %>"><%= @group.status %></span>
+      · ×<%= @group.events_count %>
+      · first <%= time_ago_in_words(@group.first_seen_at) %> ago
+      · last <%= time_ago_in_words(@group.last_seen_at) %> ago
+    </div>
+  </div>
+  <div class="head-actions">
+    <% if can?(:update, :apps) %>
+      <% if @group.open? %>
+        <%= button(text: "Resolve", href: resolve_app_exception_group_path(@app, @group), method: :post) %>
+      <% else %>
+        <%= button(text: "Reopen", href: reopen_app_exception_group_path(@app, @group), method: :post, variant: :outline) %>
+      <% end %>
+    <% end %>
+    <%= link_to "← Exceptions", app_exception_groups_path(@app), class: "btn" %>
+  </div>
+</div>
+
+<% @events.each_with_index do |event, i| %>
+  <details class="card" <%= "open" if i.zero? %>>
+    <summary>
+      <%= event.occurred_at.strftime("%Y-%m-%d %H:%M:%S %Z") %>
+      <span class="muted">· <%= truncate(event.message, length: 100) %></span>
+    </summary>
+
+    <p class="mono exc-message"><%= event.message %></p>
+
+    <% unless event.context_hash.empty? %>
+      <dl class="kv">
+        <% event.context_hash.each do |key, value| %>
+          <dt><%= key %></dt><dd class="mono"><%= value.is_a?(String) ? value : value.to_json %></dd>
+        <% end %>
+      </dl>
+    <% end %>
+
+    <% if event.backtrace.present? %>
+      <pre class="logbox"><%= event.backtrace %></pre>
+    <% end %>
+  </details>
+<% end %>

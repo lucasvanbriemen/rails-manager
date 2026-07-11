@@ -1,0 +1,58 @@
+<% content_for :title, "Exceptions · #{@app.name}" %>
+
+<div class="page-head">
+  <div>
+    <h1>Exceptions · <%= @app.name %></h1>
+    <div class="muted"><%= @open_count %> open · <%= @resolved_count %> resolved</div>
+  </div>
+  <div class="head-actions">
+    <%= button(text: "Open (#{@open_count})", href: app_exception_groups_path(@app), variant: :outline, active: @filter == "open") %>
+    <%= button(text: "Resolved (#{@resolved_count})", href: app_exception_groups_path(@app, filter: "resolved"), variant: :outline, active: @filter == "resolved") %>
+    <%= link_to "← Back", app_path(@app), class: "btn" %>
+  </div>
+</div>
+
+<% if @groups.empty? %>
+  <section class="card">
+    <p class="muted">No <%= @filter %> exceptions<%= " reported yet" if @filter == "open" && @resolved_count.zero? %>.</p>
+  </section>
+<% else %>
+  <section class="card">
+    <ul class="exceptions">
+      <% @groups.each do |group| %>
+        <li>
+          <%= link_to app_exception_group_path(@app, group) do %>
+            <span class="badge badge--exc-<%= group.status %>"><%= group.status %></span>
+            <strong class="mono"><%= group.exception_class %></strong>
+            <span class="exc-message"><%= truncate(group.message, length: 120) %></span>
+            <span class="muted">×<%= group.events_count %> · last <%= time_ago_in_words(group.last_seen_at) %> ago</span>
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  </section>
+<% end %>
+
+<details class="card" <%= "open" if @groups.empty? && @filter == "open" && @resolved_count.zero? %>>
+  <summary>Reporter setup for <%= @app.name %></summary>
+  <p class="hint">Add this initializer to the app (its ingest token is baked in). Uncaught exceptions — and anything Rails reports via <code>Rails.error</code> — will show up here.</p>
+  <pre class="logbox"><code># config/initializers/ltvb_error_reporting.rb
+if Rails.env.production?
+  Rails.error.subscribe(->(error, handled:, severity:, context:, source: nil) do
+    Thread.new do
+      Net::HTTP.post(
+        URI("<%= api_exceptions_url %>"),
+        { token: "<%= @app.ingest_token %>",
+          class: error.class.name,
+          message: error.message,
+          backtrace: error.backtrace&.first(50),
+          handled: handled, severity: severity,
+          context: context.transform_values(&:to_s),
+          occurred_at: Time.now.utc.iso8601 }.to_json,
+        "Content-Type" => "application/json")
+    rescue StandardError
+      # never take the app down over error reporting
+    end
+  end)
+end</code></pre>
+</details>

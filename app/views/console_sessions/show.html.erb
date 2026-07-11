@@ -1,0 +1,31 @@
+<% content_for :title, "Console · #{@app.fqdn}" %>
+
+<div data-controller="console"
+     data-console-url-value="<%= app_console_session_path(@app, @session, format: :json) %>"
+     data-console-input-url-value="<%= input_app_console_session_path(@app, @session) %>"
+     data-console-finished-value="<%= @session.finished? %>">
+  <div class="page-head">
+    <div>
+      <h1>Console · <%= @app.fqdn %></h1>
+      <div class="muted">
+        <span data-console-target="status" class="badge badge--console-<%= @session.status %>"><%= @session.status %><%= " (#{@session.close_reason})" if @session.close_reason %></span>
+        <% if @session.started_by %>· by <%= @session.started_by %><% end %>
+        · started <%= time_ago_in_words(@session.created_at) %> ago
+      </div>
+    </div>
+    <div class="head-actions">
+      <%= button(text: "End session", href: app_console_session_path(@app, @session), method: :delete, variant: :danger) %>
+      <%= link_to "← App", app_path(@app), class: "btn" %>
+    </div>
+  </div>
+
+  <pre class="logbox logbox--tall console-output" data-console-target="output"><%= @session.output %></pre>
+  <form class="console-input" data-action="submit->console#submit" data-console-target="form">
+    <span class="mono muted">&gt;</span>
+    <input type="text" class="mono" data-console-target="input"
+           autocomplete="off" spellcheck="false" autofocus
+           placeholder="Ruby — Enter to run, ↑/↓ for history"
+           <%= "disabled" if @session.finished? %>>
+  </form>
+  <p class="hint">Runs as the ltvb user in <span class="mono"><%= @app.app_path %></span> (production). Sessions close after <%= ConsoleSession::IDLE_TIMEOUT.inspect %> idle.</p>
+</div>

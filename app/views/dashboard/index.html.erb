@@ -9,7 +9,14 @@
       <% else %>
         <a href="<%= app.url %>" target="_blank" rel="noopener" class="end-point"><%= app.fqdn %></a>
       <% end %>
-        <td><%= status_badge(@statuses[app.id] || { status: :unknown }) %></td>
+        <td>
+          <%= status_badge(@statuses[app.id] || { status: :unknown }) %>
+          <% if (n = @open_exceptions[app.id]).to_i.positive? %>
+            <%= link_to app_exception_groups_path(app) do %>
+              <span class="badge badge--exc-open"><%= n %> exception<%= "s" if n > 1 %></span>
+            <% end %>
+          <% end %>
+        </td>
         <td><%= app.repo? ? "—" : content_tag(:code, app.ruby_version) %></td>
         <td><span class="muted"><%= app.git_branch %></span></td>
         <td>

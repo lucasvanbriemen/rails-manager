@@ -3,6 +3,11 @@ class App < ApplicationRecord
   PRIMARY_DB_KINDS = %w[sqlite external].freeze
 
   has_many :deployments, -> { order(created_at: :desc) }, dependent: :destroy
+  has_many :exception_groups, dependent: :destroy
+  has_many :console_sessions, dependent: :destroy
+
+  # Authenticates POSTs to /api/exceptions from this app's error reporter.
+  before_create { self.ingest_token ||= SecureRandom.hex(24) }
 
   # Secrets are stored encrypted at rest (keys configured from .env in
   # config/initializers/active_record_encryption.rb).

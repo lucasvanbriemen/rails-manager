@@ -3,10 +3,16 @@ default: &default
     - polling_interval: 1
       batch_size: 500
   workers:
-    - queues: "*"
+    - queues: default
       threads: 3
       processes: <%= ENV.fetch("JOB_CONCURRENCY", 1) %>
       polling_interval: 0.1
+    # Console sessions hold a thread for their whole lifetime — isolate them
+    # so open consoles can never starve deploys.
+    - queues: console
+      threads: 2
+      processes: 1
+      polling_interval: 0.5
 
 development:
   <<: *default

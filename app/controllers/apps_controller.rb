@@ -1,5 +1,5 @@
 class AppsController < ApplicationController
-  before_action :set_app, only: %i[show edit update destroy deploy restart logs]
+  before_action :set_app, only: %i[show edit update destroy deploy logs]
 
   def index
     redirect_to root_path
@@ -10,6 +10,8 @@ class AppsController < ApplicationController
 
     @status = AppStatusChecker.check(@app) if @app.rails_app?
     @deployments = @app.deployments.limit(20)
+    @open_exceptions = @app.exception_groups.open_status.recent.limit(5)
+    @open_exception_count = @app.exception_groups.open_status.count
   end
 
   def new
@@ -77,8 +79,21 @@ class AppsController < ApplicationController
   def logs
     return forbidden if cannot?(:read, :apps)
 
-    @production_log = tail(File.join(@app.app_path, "log", "production.log"))
-    @error_log      = tail(File.join(@app.webspace_root, "logs", @app.fqdn, "error_log"))
+    @files = LogFiles.for(@app)
+    @file  = params[:file].present? ? LogFiles.find(@app, params[:file]) : LogFiles.default(@app)
+    return head :not_found if params[:file].present? && @file.nil?
+
+    @lines   = LogFiles::LINE_CHOICES.find { |n| n == params[:lines].to_i } || LogFiles::LINE_CHOICES.first
+    @content = @file ? LogFiles.tail(@file.path, lines: @lines) : "(no log files found)"
+
+    respond_to do |format|
+      format.html
+      format.json { render json: { content: @content, size: @file&.size, mtime: @file&.mtime } }
+      format.text do
+        send_data @content, type: "text/plain",
+                            filename: "#{@app.name.parameterize}-#{@file&.id.to_s.tr(':', '-').presence || 'log'}.log"
+      end
+    end
   end
 
   private
@@ -101,16 +116,6 @@ class AppsController < ApplicationController
     path = dir.join("app-#{@app.id}-#{SecureRandom.hex(6)}.tar.gz").to_s
     File.binwrite(path, params[:tarball].read)
     path
-  end
-
-  # Pure-Ruby tail: read the trailing slice of the file and keep the last N lines.
-  def tail(path, lines: 200, bytes: 64_000)
-    return "(no file at #{path})" unless File.exist?(path)
-
-    data = File.open(path, "rb") { |f| f.seek([ 0, f.size - bytes ].max); f.read }
-    data.to_s.lines.last(lines).join
-  rescue StandardError => e
-    "(could not read #{path}: #{e.message})"
   end
 
   def app_params

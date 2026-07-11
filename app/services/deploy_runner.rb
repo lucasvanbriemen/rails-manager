@@ -320,46 +320,15 @@ class DeployRunner
 
   # ---- shell plumbing ------------------------------------------------------
 
-  # Child env: target app's rbenv on PATH, production, and the manager's own
-  # bundler/ruby context stripped out (nil unsets the var in the child).
+  # Child env (see AppShellEnv). Build-phase rails tasks (db:*,
+  # assets:precompile) just need the app to boot, not a real secret. Apps that
+  # read RAILS_MASTER_KEY from Apache (e.g. login) have no key in this shell,
+  # so dummy_secret uses a throwaway one here. The real key is only used by
+  # the serving Passenger process.
   def child_env(extra = {})
-    return repo_env(extra) if @app.repo?
+    return AppShellEnv.repo(extra) if @app.repo?
 
-    {
-      "RBENV_ROOT"        => @app.rbenv_root,
-      "PATH"              => "#{@app.rbenv_root}/shims:#{@app.rbenv_root}/bin:/usr/local/bin:/usr/bin:/bin",
-      "HOME"              => @app.webspace_root,
-      "RAILS_ENV"         => "production",
-      # Build-phase rails tasks (db:*, assets:precompile) just need the app to
-      # boot, not a real secret. Apps that read RAILS_MASTER_KEY from Apache
-      # (e.g. login) have no key in this shell, so use a throwaway one here.
-      # The real key is only used by the serving Passenger process.
-      "SECRET_KEY_BASE_DUMMY" => "1",
-      "BUNDLE_GEMFILE"    => nil,
-      "BUNDLE_PATH"       => nil,
-      "BUNDLE_APP_CONFIG" => nil,
-      "BUNDLE_WITHOUT"    => nil,
-      "RUBYOPT"           => nil,
-      "RUBYLIB"           => nil,
-      "GEM_HOME"          => nil,
-      "GEM_PATH"          => nil
-    }.merge(extra)
-  end
-
-  # Repos build with the ltvb user's normal environment (its real HOME, so
-  # nvm/node, npm caches and git/ssh credentials resolve), minus the manager's
-  # own bundler/ruby context. No rbenv, RAILS_ENV, or dummy secret — not Rails.
-  def repo_env(extra = {})
-    {
-      "BUNDLE_GEMFILE"    => nil,
-      "BUNDLE_PATH"       => nil,
-      "BUNDLE_APP_CONFIG" => nil,
-      "BUNDLE_WITHOUT"    => nil,
-      "RUBYOPT"           => nil,
-      "RUBYLIB"           => nil,
-      "GEM_HOME"          => nil,
-      "GEM_PATH"          => nil
-    }.merge(extra)
+    AppShellEnv.rails(@app, extra, dummy_secret: true)
   end
 
   def run!(*cmd, extra_env: {})

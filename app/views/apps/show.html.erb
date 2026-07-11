@@ -15,11 +15,11 @@
     <% if can?(:update, :apps) %>
       <%= button(text: "Deploy", href: deploy_app_path(@app), method: :post) %>
       <%= button(text: "Edit" , href: edit_app_path(@app)) %>
-
-      <% unless @app.repo? %>
-        <%= button(text: "Logs", href: logs_app_path(@app), variant: :outline)%>
+      <%= button(text: "Logs", href: logs_app_path(@app), variant: :outline) %>
+      <%= button(text: "Exceptions", href: app_exception_groups_path(@app), variant: :outline) %>
+      <% if @app.rails_app? %>
+        <%= button(text: "Console", href: app_console_sessions_path(@app), method: :post, variant: :outline) %>
       <% end %>
-
     <% end %>
   </div>
 </div>
@@ -43,7 +43,7 @@
         </dd>
       </dl>
       <% if can?(:delete, :apps) %>
-        <%= button(text: "Stop managing", href: app_path(@app), method: :delete, form: { data: { turboclaud_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } }) %>
+        <%= button(text: "Stop managing", href: app_path(@app), method: :delete, form: { data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } }) %>
       <% end %>
     <% else %>
       <dl class="kv">
@@ -58,6 +58,26 @@
       <% if can?(:delete, :apps) %>
         <%= button(text: "Delete app", href: app_path(@app), method: :delete, form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } }) %>
       <% end %>
+    <% end %>
+  </section>
+
+  <section class="card">
+    <h2>Exceptions <% if @open_exception_count.positive? %><span class="badge badge--exc-open"><%= @open_exception_count %> open</span><% end %></h2>
+    <% if @open_exceptions.empty? %>
+      <p class="muted">No open exceptions. <%= link_to "History & reporter setup", app_exception_groups_path(@app) %></p>
+    <% else %>
+      <ul class="exceptions">
+        <% @open_exceptions.each do |group| %>
+          <li>
+            <%= link_to app_exception_group_path(@app, group) do %>
+              <strong class="mono"><%= group.exception_class %></strong>
+              <span class="exc-message"><%= truncate(group.message, length: 80) %></span>
+              <span class="muted">×<%= group.events_count %> · <%= time_ago_in_words(group.last_seen_at) %> ago</span>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
+      <p><%= link_to "All exceptions →", app_exception_groups_path(@app) %></p>
     <% end %>
   </section>
 
