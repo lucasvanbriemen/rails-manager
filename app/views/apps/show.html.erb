@@ -43,8 +43,7 @@
         </dd>
       </dl>
       <% if can?(:delete, :apps) %>
-        <%= button_to "Stop managing", app_path(@app), method: :delete, class: "btn btn--danger",
-              form: { data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } } %>
+        <%= button(text: "Stop managing", href: app_path(@app), method: :delete, form: { data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } }) %>
       <% end %>
     <% else %>
       <dl class="kv">
@@ -57,8 +56,7 @@
         <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
       </dl>
       <% if can?(:delete, :apps) %>
-        <%= button_to "Delete app", app_path(@app), method: :delete, class: "btn btn--danger",
-              form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } } %>
+        <%= button(text: "Delete app", href: app_path(@app), method: :delete, form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } }) %>
       <% end %>
     <% end %>
   </section>
