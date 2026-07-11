@@ -204,6 +204,11 @@ class DeployRunner
     ensure_ruby_installed!
     run! "bundle", "config", "set", "--local", "path", "vendor/bundle"
     run! "bundle", "config", "set", "--local", "without", "development:test"
+    # Auto-remove gems not in the lock after every install. Without this, a stale
+    # copy of a default gem (e.g. an older stringio left in vendor/bundle) survives
+    # a re-bundle and Passenger pre-activates the wrong version — the app boots for
+    # the warm process but dies on the next cold spawn, so verify! misses it.
+    run! "bundle", "config", "set", "--local", "clean", "true"
     run! "bundle", "install", "--jobs", "4"
   end
 
