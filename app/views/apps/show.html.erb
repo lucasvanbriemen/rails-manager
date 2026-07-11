@@ -15,7 +15,6 @@
     <% if can?(:update, :apps) %>
       <%= button(text: "Deploy", href: deploy_app_path(@app), method: :post) %>
       <% unless @app.repo? %>
-        <%= button(text: "Restart", href: restart_app_path(@app), method: :post) %>
         <%= button(text: "Logs", href: logs_app_path(@app))%>
       <% end %>
 

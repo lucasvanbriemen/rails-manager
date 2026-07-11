@@ -7,7 +7,6 @@ Rails.application.routes.draw do
   resources :apps do
     member do
       post :deploy        # git pull / unpack upload, then build + restart
-      post :restart       # touch tmp/restart.txt
       get  :logs          # tail production.log + apache error_log
     end
     resources :deployments, only: [ :show ]

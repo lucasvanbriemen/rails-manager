@@ -1,5 +1,5 @@
 class Deployment < ApplicationRecord
-  KINDS    = %w[create deploy restart destroy].freeze
+  KINDS    = %w[create deploy destroy].freeze
   STATUSES = %w[queued running succeeded failed].freeze
 
   belongs_to :app

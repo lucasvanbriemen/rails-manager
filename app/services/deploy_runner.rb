@@ -31,7 +31,6 @@ class DeployRunner
       case @deployment.kind
       when "create"          then provision!; deploy!
       when "deploy"          then deploy!
-      when "restart"         then restart!; verify!
       when "destroy"         then destroy!
       else raise StepFailed, "unknown kind #{@deployment.kind}"
       end

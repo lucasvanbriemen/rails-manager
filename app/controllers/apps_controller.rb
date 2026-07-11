@@ -74,14 +74,6 @@ class AppsController < ApplicationController
     redirect_to app_deployment_path(@app, deployment), notice: "Deploying…"
   end
 
-  def restart
-    return forbidden if cannot?(:update, :apps)
-
-    deployment = @app.deployments.create!(kind: "restart", triggered_by: admin_email)
-    enqueue(deployment, allow_upload: false)
-    redirect_to app_deployment_path(@app, deployment), notice: "Restarting…"
-  end
-
   def logs
     return forbidden if cannot?(:read, :apps)
 
