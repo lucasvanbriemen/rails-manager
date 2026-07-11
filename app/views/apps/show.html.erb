@@ -14,11 +14,12 @@
   <div class="head-actions">
     <% if can?(:update, :apps) %>
       <%= button(text: "Deploy", href: deploy_app_path(@app), method: :post) %>
+      <%= button(text: "Edit" , href: edit_app_path(@app)) %>
+
       <% unless @app.repo? %>
-        <%= button(text: "Logs", href: logs_app_path(@app))%>
+        <%= button(text: "Logs", href: logs_app_path(@app), variant: :outline)%>
       <% end %>
 
-      <%= button(text: "Edit", href: edit_app_path(@app)) %>
     <% end %>
   </div>
 </div>
