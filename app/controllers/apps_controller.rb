@@ -16,7 +16,7 @@ class AppsController < ApplicationController
     return forbidden if cannot?(:create, :apps)
 
     @app = App.new(app_kind: params[:app_kind].presence || "rails",
-                   ruby_version: "3.3.8", git_branch: "main",
+                   ruby_version: "3.3.8", git_branch: "master",
                    primary_db_kind: "external")
   end
 
