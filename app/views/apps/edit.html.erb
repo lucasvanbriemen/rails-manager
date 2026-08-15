@@ -1,3 +1,15 @@
 <% content_for :title, "Edit #{@app.fqdn}" %>
-<div class="page-head"><h1>Edit <%= @app.fqdn %></h1></div>
+
+<div class="page-head">
+  <div>
+    <h1>Edit <%= @app.name %></h1>
+    <div class="page-head__meta">
+      <span class="mono"><%= @app.repo? ? @app.deploy_path : @app.fqdn %></span>
+    </div>
+  </div>
+  <div class="head-actions">
+    <%= button(text: "← Back to app", href: app_path(@app), variant: :text) %>
+  </div>
+</div>
+
 <%= render "form", app: @app %>

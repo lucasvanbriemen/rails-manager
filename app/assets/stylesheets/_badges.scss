@@ -1,0 +1,74 @@
+// ---------------------------------------------------------------------------
+// Status badges.
+// ---------------------------------------------------------------------------
+// Badges carry state, never identity. Every tone is derived from a semantic
+// token (success/warning/error), so the same class reads correctly in both
+// themes, and each badge always prints its own word — the colour is a second
+// channel, not the only one.
+
+.badge {
+  --badge-tone: var(--outline);
+
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.16rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 650;
+  line-height: 1.5;
+  white-space: nowrap;
+  text-transform: lowercase;
+  border: 1px solid color-mix(in srgb, var(--badge-tone) 45%, transparent);
+  background: color-mix(in srgb, var(--badge-tone) 14%, transparent);
+  color: color-mix(in srgb, var(--badge-tone) 85%, var(--on-surface));
+
+  // The leading dot repeats the state at a glance in a dense list.
+  &::before {
+    content: "";
+    width: 0.4rem;
+    height: 0.4rem;
+    border-radius: 50%;
+    background: var(--badge-tone);
+    flex: none;
+  }
+}
+
+.badge--ok      { --badge-tone: var(--success); }
+.badge--warn    { --badge-tone: var(--warning); }
+.badge--danger  { --badge-tone: var(--error); }
+.badge--info    { --badge-tone: var(--primary); }
+.badge--neutral { --badge-tone: var(--outline); color: var(--muted); }
+
+// A live state worth noticing across the room.
+.badge--busy::before {
+  animation: badge-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge--busy::before { animation: none; }
+}
+
+// A count chip (open exceptions, deliveries) — same shape, no state colour.
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.16rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--on-surface) 7%, transparent);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+
+  &.mono { font-size: 0.7rem; }
+}
+
+a .chip:hover { color: var(--primary); }

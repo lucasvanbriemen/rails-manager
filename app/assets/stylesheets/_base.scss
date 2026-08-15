@@ -1,0 +1,156 @@
+// ---------------------------------------------------------------------------
+// Page shell: background, container, page headings, flashes, primitives.
+// ---------------------------------------------------------------------------
+
+body {
+  // A single soft wash behind the sticky header so the frosted glass has
+  // something to blur. Fixed attachment keeps it pinned while the page scrolls.
+  background-image: radial-gradient(
+    90% 55rem at 50% -12rem,
+    color-mix(in srgb, var(--primary) 13%, transparent),
+    transparent 70%
+  );
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+
+code, .mono, pre, kbd { font-family: var(--mono); }
+
+a { color: var(--primary); }
+a:hover { text-decoration: underline; }
+
+.container {
+  max-width: 76rem;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 5rem;
+}
+
+// --- page heading ----------------------------------------------------------
+
+.page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem 1.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.75rem;
+
+  h1 {
+    margin: 0;
+    font-size: 1.55rem;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+    word-break: break-word;
+  }
+}
+
+// Subtitle under a page title: badges, paths, counts.
+.page-head__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+
+  a { color: var(--muted); }
+  a:hover { color: var(--primary); }
+}
+
+// Button rows. The shared forms sheet makes every <form> a flex column, which
+// would drop each button_to onto its own line — keep them in the row.
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+
+  form {
+    display: inline-flex;
+    flex-direction: row;
+    margin: 0;
+
+    button { margin-top: 0; }
+  }
+}
+
+// A destructive action that isn't the point of the page (Delete app sitting at
+// the foot of a config card) shouldn't out-shout the primary one. The shared
+// button set has no quiet danger variant, so tint an outline button locally.
+.button-outline.is-danger {
+  color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 45%, transparent);
+
+  &:hover:not(:disabled, .disabled) {
+    background-color: color-mix(in srgb, var(--error) 15%, transparent);
+    color: var(--error);
+  }
+}
+
+// --- primitives ------------------------------------------------------------
+
+.muted { color: var(--muted); font-size: 0.85rem; }
+.hint  { color: var(--muted); font-size: 0.8rem; line-height: 1.5; margin: 0.35rem 0 0.9rem; }
+.break { word-break: break-all; }
+.section { margin-top: 2.5rem; }
+
+// Inline code inside prose (paths, class names, config keys).
+p code, dd code, li code, span code, .hint code {
+  background: color-mix(in srgb, var(--on-surface) 8%, transparent);
+  border-radius: 5px;
+  padding: 0.1rem 0.32rem;
+  font-size: 0.85em;
+}
+
+.empty {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 1.75rem 1.25rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+// --- flash -----------------------------------------------------------------
+
+.flash {
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius-sm);
+  margin-bottom: 1.25rem;
+  font-size: 0.9rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.flash--notice {
+  background: color-mix(in srgb, var(--success) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--success) 45%, transparent);
+}
+
+.flash--alert {
+  background: color-mix(in srgb, var(--error) 14%, var(--panel));
+  border-color: color-mix(in srgb, var(--error) 45%, transparent);
+}
+
+// --- scrollbars ------------------------------------------------------------
+// Default macOS/Chrome scrollbars punch a bright white gutter through the dark
+// panels; scope a quiet one to the elements that actually scroll.
+
+.logbox {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-variant) transparent;
+
+  &::-webkit-scrollbar { width: 10px; height: 10px; }
+  &::-webkit-scrollbar-track { background: transparent; }
+  &::-webkit-scrollbar-thumb {
+    background: var(--surface-variant);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  &::-webkit-scrollbar-thumb:hover { background-color: var(--outline); background-clip: content-box; }
+}

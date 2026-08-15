@@ -3,18 +3,20 @@
 <div class="page-head">
   <div>
     <h1><%= @app.name %></h1>
-    <div class="muted">
+    <div class="page-head__meta">
       <% if @app.repo? %>
-        <span class="mono"><%= @app.deploy_path %></span> · <%= status_badge(status: :repo) %>
+        <%= status_badge(status: :repo) %>
+        <span class="mono"><%= @app.deploy_path %></span>
       <% else %>
-        <a href="<%= @app.url %>" target="_blank" rel="noopener"><%= @app.fqdn %></a> · <%= status_badge(@status) %>
+        <%= status_badge(@status) %>
+        <a href="<%= @app.url %>" target="_blank" rel="noopener" class="mono"><%= @app.fqdn %></a>
       <% end %>
     </div>
   </div>
   <div class="head-actions">
     <% if can?(:update, :apps) %>
       <%= button(text: "Deploy", href: deploy_app_path(@app), method: :post) %>
-      <%= button(text: "Edit" , href: edit_app_path(@app)) %>
+      <%= button(text: "Edit" , href: edit_app_path(@app), variant: :outline) %>
       <%= button(text: "Logs", href: logs_app_path(@app), variant: :outline) %>
       <%= button(text: "Exceptions", href: app_exception_groups_path(@app), variant: :outline) %>
       <% if @app.rails_app? %>
@@ -43,52 +45,57 @@
         </dd>
       </dl>
       <% if can?(:delete, :apps) %>
-        <%= button(text: "Stop managing", href: app_path(@app), method: :delete, form: { data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." } }) %>
+        <div class="card__actions">
+          <%= button(text: "Stop managing", href: app_path(@app), method: :delete, variant: :outline, class: "is-danger",
+                     data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." }) %>
+        </div>
       <% end %>
     <% else %>
       <dl class="kv">
         <dt>Path</dt><dd class="mono"><%= @app.app_path %></dd>
         <dt>Document root</dt><dd class="mono"><%= @app.public_path %></dd>
-        <dt>Ruby</dt><dd><code><%= @app.ruby_version %></code></dd>
+        <dt>Ruby</dt><dd class="mono"><%= @app.ruby_version %></dd>
         <dt>Source</dt><dd><%= @app.git_repo_url %> (<%= @app.git_branch %>)</dd>
         <dt>Primary DB</dt><dd><%= @app.primary_db_kind %></dd>
         <dt>master.key</dt><dd><%= @app.master_key.present? ? "set" : "—" %></dd>
         <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
       </dl>
       <% if can?(:delete, :apps) %>
-        <%= button(text: "Delete app", href: app_path(@app), method: :delete, form: { data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" } }) %>
+        <div class="card__actions">
+          <%= button(text: "Delete app", href: app_path(@app), method: :delete, variant: :outline, class: "is-danger",
+                     data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" }) %>
+        </div>
       <% end %>
     <% end %>
   </section>
 
   <section class="card">
-    <h2>Exceptions <% if @open_exception_count.positive? %><span class="badge badge--exc-open"><%= @open_exception_count %> open</span><% end %></h2>
+    <h2>
+      Exceptions
+      <% if @open_exception_count.positive? %><%= badge("#{@open_exception_count} open", tone: :danger) %><% end %>
+    </h2>
     <% if @open_exceptions.empty? %>
-      <p class="muted">No open exceptions. <%= link_to "History & reporter setup", app_exception_groups_path(@app) %></p>
+      <p class="muted">No open exceptions. <%= link_to "History &amp; reporter setup →".html_safe, app_exception_groups_path(@app) %></p>
     <% else %>
       <ul class="exceptions">
         <% @open_exceptions.each do |group| %>
           <li>
             <%= link_to app_exception_group_path(@app, group) do %>
-              <strong class="mono"><%= group.exception_class %></strong>
-              <span class="exc-message"><%= truncate(group.message, length: 80) %></span>
-              <span class="muted">×<%= group.events_count %> · <%= time_ago_in_words(group.last_seen_at) %> ago</span>
+              <span class="exc-head"><span class="exc-class"><%= group.exception_class %></span></span>
+              <span class="exc-count">×<%= group.events_count %> · <%= time_ago_in_words(group.last_seen_at) %></span>
+              <span class="exc-message"><%= truncate(group.message, length: 100) %></span>
             <% end %>
           </li>
         <% end %>
       </ul>
-      <p><%= link_to "All exceptions →", app_exception_groups_path(@app) %></p>
+      <div class="card__actions"><%= link_to "All exceptions →", app_exception_groups_path(@app) %></div>
     <% end %>
   </section>
 
   <section class="card">
     <h2>
       Auto-deploy
-      <% if @app.auto_deploy? %>
-        <span class="badge badge--rails">on</span>
-      <% else %>
-        <span class="badge">off</span>
-      <% end %>
+      <%= @app.auto_deploy? ? badge("on", tone: :ok) : badge("off") %>
     </h2>
 
     <dl class="kv">
@@ -100,33 +107,35 @@
         <% if @app.webhook_secret.present? %>
           set — <span class="muted">pushes are only accepted with a matching signature</span>
         <% else %>
-          <span class="badge badge--error5xx">not set</span>
+          <%= badge("not set", tone: :danger) %>
           <span class="muted">— every delivery is rejected until you add one in Edit</span>
         <% end %>
       </dd>
       <dt>Branch</dt>
-      <dd><code><%= @app.webhook_branch.presence || @app.git_branch %></code></dd>
+      <dd class="mono"><%= @app.webhook_branch.presence || @app.git_branch %></dd>
     </dl>
 
     <% if @deliveries.present? %>
-      <ul class="deploys">
+      <ul class="rows card__list">
         <% @deliveries.each do |d| %>
           <li>
-            <span class="badge badge--dep-<%= d.status == 'deployed' ? 'succeeded' : 'queued' %>"><%= d.status %></span>
-            <strong class="mono"><%= d.short_sha.presence || d.event %></strong>
-            <span class="muted">
-              <%= d.branch.presence %>
-              <%= "· #{d.pusher}" if d.pusher.present? %>
-              · <%= time_ago_in_words(d.created_at) %> ago
-            </span>
+            <div class="row-line">
+              <%= badge(d.status, tone: d.status == "deployed" ? :ok : :neutral) %>
+              <strong class="mono"><%= d.short_sha.presence || d.event %></strong>
+              <span class="muted">
+                <%= d.branch.presence %>
+                <%= "· #{d.pusher}" if d.pusher.present? %>
+                · <%= time_ago_in_words(d.created_at) %>
+              </span>
+            </div>
             <% if d.message.present? %>
-              <div class="muted"><%= d.message %></div>
+              <div class="row-note"><%= d.message %></div>
             <% end %>
           </li>
         <% end %>
       </ul>
     <% else %>
-      <p class="muted">No deliveries received yet.</p>
+      <p class="muted card__list">No deliveries received yet.</p>
     <% end %>
   </section>
 
@@ -135,13 +144,13 @@
     <% if @deployments.empty? %>
       <p class="muted">No deployments yet.</p>
     <% else %>
-      <ul class="deploys">
+      <ul class="rows">
         <% @deployments.each do |d| %>
           <li>
             <%= link_to app_deployment_path(@app, d) do %>
               <%= deployment_badge(d) %>
               <strong><%= d.kind %></strong>
-              <span class="muted"><%= d.ref.to_s.first(10) %> · <%= time_ago_in_words(d.created_at) %> ago<%= " · #{d.duration}s" if d.duration %></span>
+              <span class="muted"><%= d.ref.to_s.first(10) %> · <%= time_ago_in_words(d.created_at) %><%= " · #{d.duration}s" if d.duration %></span>
             <% end %>
           </li>
         <% end %>

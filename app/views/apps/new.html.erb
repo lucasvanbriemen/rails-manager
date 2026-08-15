@@ -1,4 +1,13 @@
 <% title = @app.repo? ? "New repo" : "New app" %>
 <% content_for :title, title %>
-<div class="page-head"><h1><%= title %></h1></div>
+
+<div class="page-head">
+  <div>
+    <h1><%= title %></h1>
+    <div class="page-head__meta">
+      <%= @app.repo? ? "Pulled to a path and built with follow-up commands." : "Served as a Plesk subdomain behind nginx." %>
+    </div>
+  </div>
+</div>
+
 <%= render "form", app: @app %>

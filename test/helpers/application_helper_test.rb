@@ -37,19 +37,19 @@ class ApplicationHelperTest < ActionView::TestCase
     assert_includes html, "22%"
     assert_includes html, "Disk"
     assert_includes html, "76 GB of 348 GB"
-    assert_includes html, "meter--ok"
+    assert_includes html, "tile--ok"
   end
 
   test "meter escalates its class with the level" do
-    assert_includes meter(0.80, label: "Memory"), "meter--warn"
-    assert_includes meter(0.95, label: "Memory"), "meter--critical"
+    assert_includes meter(0.80, label: "Memory"), "tile--warn"
+    assert_includes meter(0.95, label: "Memory"), "tile--critical"
   end
 
   test "meter renders a no-data state rather than a misleading zero" do
     html = meter(nil, label: "CPU")
     assert_includes html, "—"
     assert_not_includes html, "0%"
-    assert_not_includes html, "meter__track" # no bar to draw
+    assert_not_includes html, "tile__track" # no bar to draw
   end
 
   test "meter keeps its label and detail when there is no reading" do
@@ -62,14 +62,43 @@ class ApplicationHelperTest < ActionView::TestCase
 
   test "meter carries no status class when there is no reading" do
     html = meter(nil, label: "CPU")
-    assert_not_includes html, "meter--ok"
-    assert_not_includes html, "meter--warn"
-    assert_not_includes html, "meter--critical"
+    assert_not_includes html, "tile--ok"
+    assert_not_includes html, "tile--warn"
+    assert_not_includes html, "tile--critical"
   end
 
   test "meter escapes its label and detail" do
     html = meter(0.5, label: "<script>x</script>", detail: "<img>")
     assert_not_includes html, "<script>"
     assert_not_includes html, "<img>"
+  end
+
+  test "badges are classed by tone, not by the word they print" do
+    # Two different statuses that mean the same thing must look the same.
+    assert_includes status_badge(status: :rails),    "badge--ok"
+    assert_includes status_badge(status: :redirect), "badge--ok"
+    assert_includes status_badge(status: :down),     "badge--danger"
+    assert_includes status_badge(status: :repo),     "badge--neutral"
+  end
+
+  test "an unknown status still renders a readable badge" do
+    html = status_badge(status: :something_new)
+    assert_includes html, "something_new"
+    assert_includes html, "badge--neutral"
+  end
+
+  test "status badge carries the detail as a tooltip" do
+    assert_includes status_badge(status: :down, detail: "connection refused"), "connection refused"
+  end
+
+  test "an in-flight deployment badge pulses, a finished one does not" do
+    assert_includes deployment_badge(Deployment.new(status: "running")), "badge--busy"
+    assert_not_includes deployment_badge(Deployment.new(status: "succeeded")), "badge--busy"
+    assert_includes deployment_badge(Deployment.new(status: "succeeded")), "badge--ok"
+    assert_includes deployment_badge(Deployment.new(status: "failed")), "badge--danger"
+  end
+
+  test "a missing deployment says so instead of rendering an empty badge" do
+    assert_includes deployment_badge(nil), "never deployed"
   end
 end

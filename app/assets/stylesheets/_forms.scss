@@ -1,0 +1,184 @@
+// ---------------------------------------------------------------------------
+// Forms.
+// ---------------------------------------------------------------------------
+// The app/repo form is 25+ fields, half of which need a paragraph of
+// explanation. It deliberately does NOT use the shared floating-label
+// `.input-wrapper` builder: that wrapper is a fixed-height bordered box, so a
+// textarea overflows it and a helper paragraph lands *inside* the field
+// outline. Static top labels also stay readable when every field is filled in,
+// which is the normal state of a config screen.
+
+.form {
+  display: block;
+  max-width: 48rem;
+}
+
+.field {
+  margin-bottom: 1.15rem;
+
+  > label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--muted);
+    margin-bottom: 0.35rem;
+  }
+}
+
+.form {
+  input[type="text"],
+  input[type="number"],
+  input[type="password"],
+  input[type="email"],
+  select,
+  textarea {
+    width: 100%;
+    padding: 0.6rem 0.7rem;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    color: var(--on-surface);
+    font: inherit;
+    font-size: 0.9rem;
+
+    &::placeholder { color: color-mix(in srgb, var(--muted) 65%, transparent); }
+
+    &:hover { border-color: var(--outline); }
+
+    &:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent);
+    }
+  }
+
+  select {
+    appearance: none;
+    padding-right: 2rem;
+    // Caret drawn in the token colour so it survives both themes; encoded
+    // currentColor isn't available in a data URI, hence the CSS triangle.
+    background-image:
+      linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: right 1.05rem center, right 0.8rem center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+  }
+
+  textarea {
+    display: block;
+    min-height: 3rem;
+    line-height: 1.5;
+    resize: vertical;
+
+    &.mono { font-family: var(--mono); font-size: 0.82rem; }
+  }
+
+  input.mono, .mono input { font-family: var(--mono); font-size: 0.85rem; }
+}
+
+.field__hint {
+  margin: 0.4rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+// --- checkboxes ------------------------------------------------------------
+
+.field--check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-bottom: 0.35rem;
+
+  input[type="checkbox"] {
+    width: 1.05rem;
+    height: 1.05rem;
+    margin: 0.1rem 0 0;
+    flex: none;
+    accent-color: var(--primary);
+    cursor: pointer;
+  }
+
+  label {
+    margin: 0;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--on-surface);
+    cursor: pointer;
+  }
+
+  // The hint belongs to the checkbox, so it indents under it and carries the
+  // gap to whatever comes next. Without one, the checkbox owns that gap.
+  + .field__hint { margin: 0 0 1.15rem 1.65rem; }
+  + .field, + fieldset { margin-top: 1.15rem; }
+}
+
+// --- grouping --------------------------------------------------------------
+
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0 1rem;
+}
+
+.form fieldset {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 1.1rem 1.15rem 0.5rem;
+  margin: 0 0 1.5rem;
+  background: color-mix(in srgb, var(--on-surface) 3%, transparent);
+
+  legend {
+    padding: 0 0.45rem;
+    margin-left: -0.45rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+  }
+
+  > .field__hint:first-of-type { margin-top: 0; margin-bottom: 1.15rem; }
+}
+
+// The kind switcher above the form (Rails app <-> repo).
+.form-kind {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: 0.85rem;
+  color: var(--muted);
+
+  strong { color: var(--on-surface); font-weight: 600; }
+  form { display: inline-flex; flex-direction: row; margin: 0; }
+  .button { margin-top: 0; }
+}
+
+.form-kind__spacer { flex: 1; }
+
+// --- actions ---------------------------------------------------------------
+// Sticky, because the form is taller than any screen and Save lives at the end.
+
+.form-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 1.5rem;
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  backdrop-filter: blur(10px);
+
+  .button, button, input[type="submit"] { margin-top: 0; }
+}

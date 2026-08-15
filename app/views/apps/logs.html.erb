@@ -1,38 +1,53 @@
 <% content_for :title, "Logs · #{@app.fqdn}" %>
+
 <div class="page-head">
-  <h1>Logs · <%= @app.repo? ? @app.name : @app.fqdn %></h1>
-  <%= link_to "← Back", app_path(@app), class: "btn" %>
+  <div>
+    <h1>Logs</h1>
+    <div class="page-head__meta">
+      <%= link_to (@app.repo? ? @app.name : @app.fqdn), app_path(@app), class: "mono" %>
+    </div>
+  </div>
+  <div class="head-actions">
+    <% if @file %>
+      <%= button(text: "Download", href: logs_app_path(@app, file: @file.id, lines: @lines, format: :text), variant: :outline) %>
+    <% end %>
+    <%= button(text: "← Back", href: app_path(@app), variant: :text) %>
+  </div>
 </div>
 
 <% if @file %>
   <div data-controller="log-viewer"
-       data-log-viewer-url-value="<%= logs_app_path(@app, file: @file.id, lines: @lines, format: :json) %>">
-    <form method="get" action="<%= logs_app_path(@app) %>" class="form log-toolbar">
-      <select name="file" data-action="change->log-viewer#reload">
-        <% @files.each do |f| %>
-          <option value="<%= f.id %>" <%= "selected" if f.id == @file.id %>>
-            <%= f.label %> (<%= number_to_human_size(f.size) %>)
-          </option>
-        <% end %>
-      </select>
-      <select name="lines" data-action="change->log-viewer#reload">
-        <% LogFiles::LINE_CHOICES.each do |n| %>
-          <option value="<%= n %>" <%= "selected" if n == @lines %>>last <%= n %> lines</option>
-        <% end %>
-      </select>
-      <input type="text" placeholder="filter…" data-log-viewer-target="filter"
-             data-action="input->log-viewer#render">
-      <label class="log-follow">
+       data-log-viewer-url-value="<%= logs_app_path(@app, file: @file.id, lines: @lines, format: :json) %>"
+       class="viewer">
+    <div class="viewer__bar">
+      <form method="get" action="<%= logs_app_path(@app) %>">
+        <select name="file" data-action="change->log-viewer#reload" aria-label="Log file">
+          <% @files.each do |f| %>
+            <option value="<%= f.id %>" <%= "selected" if f.id == @file.id %>>
+              <%= f.label %> (<%= number_to_human_size(f.size) %>)
+            </option>
+          <% end %>
+        </select>
+        <select name="lines" data-action="change->log-viewer#reload" aria-label="Lines to tail">
+          <% LogFiles::LINE_CHOICES.each do |n| %>
+            <option value="<%= n %>" <%= "selected" if n == @lines %>>last <%= n %> lines</option>
+          <% end %>
+        </select>
+      </form>
+
+      <input type="text" placeholder="filter…" aria-label="Filter lines"
+             data-log-viewer-target="filter" data-action="input->log-viewer#render">
+
+      <label class="viewer__toggle">
         <input type="checkbox" data-log-viewer-target="follow" data-action="log-viewer#toggleFollow">
         Follow
       </label>
-      <%= link_to "Download", logs_app_path(@app, file: @file.id, lines: @lines, format: :text), class: "btn btn--small" %>
-    </form>
+    </div>
 
-    <div class="muted mono"><%= @file.path %> · <%= number_to_human_size(@file.size) %> · updated <%= time_ago_in_words(@file.mtime) %> ago</div>
+    <div class="viewer__meta"><%= @file.path %> · <%= number_to_human_size(@file.size) %> · updated <%= time_ago_in_words(@file.mtime) %></div>
 
     <pre class="logbox logbox--tall" data-log-viewer-target="output"><%= @content %></pre>
   </div>
 <% else %>
-  <p class="muted">No log files found for this app.</p>
+  <p class="empty">No log files found for this app.</p>
 <% end %>

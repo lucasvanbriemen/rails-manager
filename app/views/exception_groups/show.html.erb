@@ -3,11 +3,12 @@
 <div class="page-head">
   <div>
     <h1 class="mono"><%= @group.exception_class %></h1>
-    <div class="muted">
-      <span class="badge badge--exc-<%= @group.status %>"><%= @group.status %></span>
+    <div class="page-head__meta">
+      <%= exception_badge(@group.status) %>
+      <%= link_to @app.name, app_path(@app), class: "mono" %>
       · ×<%= @group.events_count %>
-      · first <%= time_ago_in_words(@group.first_seen_at) %> ago
-      · last <%= time_ago_in_words(@group.last_seen_at) %> ago
+      · first <%= time_ago_in_words(@group.first_seen_at) %>
+      · last <%= time_ago_in_words(@group.last_seen_at) %>
     </div>
   </div>
   <div class="head-actions">
@@ -18,18 +19,18 @@
         <%= button(text: "Reopen", href: reopen_app_exception_group_path(@app, @group), method: :post, variant: :outline) %>
       <% end %>
     <% end %>
-    <%= link_to "← Exceptions", app_exception_groups_path(@app), class: "btn" %>
+    <%= button(text: "← Exceptions", href: app_exception_groups_path(@app), variant: :text) %>
   </div>
 </div>
 
 <% @events.each_with_index do |event, i| %>
   <details class="card" <%= "open" if i.zero? %>>
     <summary>
-      <%= event.occurred_at.strftime("%Y-%m-%d %H:%M:%S %Z") %>
+      <span class="mono"><%= event.occurred_at.strftime("%Y-%m-%d %H:%M:%S %Z") %></span>
       <span class="muted">· <%= truncate(event.message, length: 100) %></span>
     </summary>
 
-    <p class="mono exc-message"><%= event.message %></p>
+    <p class="exc-detail"><%= event.message %></p>
 
     <% unless event.context_hash.empty? %>
       <dl class="kv">

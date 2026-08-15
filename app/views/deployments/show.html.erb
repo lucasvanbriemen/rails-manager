@@ -2,18 +2,23 @@
 
 <div class="page-head">
   <div>
-    <h1><%= @deployment.kind %> · <%= @app.fqdn %></h1>
-    <div class="muted">
-      <span data-deploy-log-target="status" class="badge badge--dep-<%= @deployment.status %>"><%= @deployment.status %></span>
-      <% if @deployment.ref.present? %>· <code><%= @deployment.ref.first(12) %></code><% end %>
+    <h1><%= @deployment.kind.to_s.humanize %></h1>
+    <div class="page-head__meta">
+      <%= deployment_badge(@deployment, data: { deploy_log_target: "status" }) %>
+      <% if @deployment.ref.present? %><span class="mono"><%= @deployment.ref.first(12) %></span><% end %>
       <% if @deployment.triggered_by %>· by <%= @deployment.triggered_by %><% end %>
+      · <%= time_ago_in_words(@deployment.created_at) %><%= " · #{@deployment.duration}s" if @deployment.duration %>
     </div>
   </div>
-  <%= link_to "← App", app_path(@app), class: "btn" %>
+  <div class="head-actions">
+    <%= button(text: "← App", href: app_path(@app), variant: :text) %>
+  </div>
 </div>
 
 <div data-controller="deploy-log"
      data-deploy-log-url-value="<%= app_deployment_path(@app, @deployment, format: :json) %>"
-     data-deploy-log-finished-value="<%= @deployment.finished? %>">
+     data-deploy-log-finished-value="<%= @deployment.finished? %>"
+     class="viewer">
+  <div class="viewer__meta"><%= @app.repo? ? @app.deploy_path : @app.fqdn %></div>
   <pre class="logbox logbox--tall" data-deploy-log-target="log"><%= @deployment.log %></pre>
 </div>

@@ -1,25 +1,65 @@
 module ApplicationHelper
+  # --- badges --------------------------------------------------------------
+
+  # A badge carries state, so it is styled by *tone* (ok/warn/danger/neutral),
+  # not by the specific word it happens to print. Adding a status means adding
+  # a row here, not a colour rule in the stylesheet.
   STATUS_LABELS = {
-    rails:       "Live",
-    redirect:    "Live",
-    placeholder: "Placeholder!",
+    rails:       "live",
+    redirect:    "live",
+    placeholder: "placeholder!",
     error5xx:    "5xx error",
-    down:        "Down",
-    repo:        "Repo",
-    unknown:     "Unknown"
+    down:        "down",
+    repo:        "repo",
+    unknown:     "unknown"
   }.freeze
 
-  def status_badge(status)
-    sym = status.is_a?(Hash) ? status[:status] : status
-    label = STATUS_LABELS[sym] || sym.to_s
-    title = status.is_a?(Hash) ? status[:detail] : nil
-    tag.span(label, class: "badge badge--#{sym}", title: title)
+  STATUS_TONES = {
+    rails: :ok, redirect: :ok,
+    placeholder: :danger, error5xx: :danger, down: :danger,
+    repo: :neutral, unknown: :neutral
+  }.freeze
+
+  DEPLOYMENT_TONES = {
+    "succeeded" => :ok, "deployed" => :ok,
+    "failed" => :danger,
+    "running" => :busy, "queued" => :busy,
+    "ignored" => :neutral
+  }.freeze
+
+  CONSOLE_TONES = {
+    "running" => :busy, "queued" => :busy,
+    "closed" => :neutral, "failed" => :danger
+  }.freeze
+
+  # tone: :ok, :warn, :danger, :info, :neutral, or :busy (warn + pulsing dot).
+  def badge(text, tone: :neutral, **attrs)
+    classes = [ "badge", "badge--#{tone == :busy ? 'warn' : tone}", ("badge--busy" if tone == :busy) ]
+    tag.span(text, class: classes.compact.join(" "), **attrs)
   end
 
-  def deployment_badge(deployment)
-    return tag.span("—", class: "badge") unless deployment
+  def status_badge(status)
+    sym    = status.is_a?(Hash) ? status[:status] : status
+    detail = status.is_a?(Hash) ? status[:detail] : nil
 
-    tag.span(deployment.status, class: "badge badge--dep-#{deployment.status}")
+    badge(STATUS_LABELS[sym] || sym.to_s, tone: STATUS_TONES.fetch(sym, :neutral), title: detail)
+  end
+
+  def deployment_badge(deployment, **attrs)
+    return badge("never deployed", **attrs) unless deployment
+
+    badge(deployment.status, tone: DEPLOYMENT_TONES.fetch(deployment.status.to_s, :neutral), **attrs)
+  end
+
+  def console_badge(session, **attrs)
+    label = session.status.dup
+    label << " (#{session.close_reason})" if session.close_reason
+
+    badge(label, tone: CONSOLE_TONES.fetch(session.status.to_s, :neutral), **attrs)
+  end
+
+  def exception_badge(status)
+    badge(status.to_s, tone: status.to_s == "open" ? :danger : :ok)
   end
 
   # --- system vitals -------------------------------------------------------
@@ -35,27 +75,36 @@ module ApplicationHelper
     :ok
   end
 
-  # A labelled bar. The percentage is always rendered as text beside it, so the
-  # state is never carried by colour alone (colourblind readers, print, forced
-  # -colors mode all still get the number).
+  # One tile for every reading on the vitals strip, whether or not it has a
+  # bar. A row of six identical boxes lines up; a mix of two shapes doesn't.
   #
-  # A nil fraction still renders the label and detail: an unlabelled "no data"
+  # A missing value still renders the label and detail: an unlabelled "no data"
   # tile is unreadable in a row of them, and the detail is often the whole point
   # (swap's "none configured" is a real answer, not a missing one).
-  def meter(fraction, label:, detail: nil)
-    pct     = fraction && (fraction * 100).round
-    classes = [ "meter", ("meter--#{meter_level(fraction)}" if fraction) ].compact
+  def tile(label:, value:, detail: nil, level: nil, track: nil)
+    classes = [ "tile", ("tile--#{level}" if level) ].compact
 
     tag.div(class: classes.join(" ")) do
       safe_join([
-        tag.div(class: "meter__head") do
-          safe_join([ tag.span(label, class: "meter__label"),
-                      tag.span(pct ? "#{pct}%" : "—", class: "meter__value") ])
-        end,
-        (tag.div(tag.i(style: "width: #{pct}%"), class: "meter__track") if pct),
-        (tag.div(detail, class: "meter__detail") if detail)
+        tag.span(label, class: "tile__label"),
+        tag.span(value.presence || "—", class: "tile__value mono"),
+        track,
+        (tag.span(detail, class: "tile__detail") if detail)
       ].compact)
     end
+  end
+
+  # A labelled bar. The percentage is always rendered as text above it, so the
+  # state is never carried by colour alone (colourblind readers, print, forced
+  # -colors mode all still get the number).
+  def meter(fraction, label:, detail: nil)
+    pct   = fraction && (fraction * 100).round
+
+    tile(label: label,
+         value: pct ? "#{pct}%" : nil,
+         detail: detail,
+         level: fraction && meter_level(fraction),
+         track: (tag.div(tag.i(style: "width: #{pct}%"), class: "tile__track") if pct))
   end
 
   def bytes_human(bytes)

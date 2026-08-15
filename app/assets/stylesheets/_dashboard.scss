@@ -1,0 +1,158 @@
+// ---------------------------------------------------------------------------
+// Dashboard: server vitals strip + the app grid.
+// ---------------------------------------------------------------------------
+
+// --- vitals ----------------------------------------------------------------
+// Meters and plain readings share one tile so a row of six lines up on a grid
+// instead of stair-stepping. Status colours (--success/--warning/--error) mark
+// the level; the percentage is always printed too, so nothing depends on
+// colour alone.
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 2.5rem;
+}
+
+.tile {
+  --tone: var(--outline);
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 6.75rem;
+  padding: 0.85rem 0.95rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+
+  &--ok       { --tone: var(--success); }
+  &--warn     { --tone: var(--warning); }
+  &--critical { --tone: var(--error); border-color: color-mix(in srgb, var(--error) 40%, var(--line)); }
+
+  &__label {
+    font-size: 0.68rem;
+    font-weight: 650;
+    text-transform: uppercase;
+    letter-spacing: 0.09em;
+    color: var(--muted);
+  }
+
+  &__value {
+    font-size: 1.65rem;
+    font-weight: 650;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--on-surface);
+  }
+
+  &__track {
+    height: 5px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--on-surface) 12%, transparent);
+    overflow: hidden;
+
+    i {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      background: var(--tone);
+      transition: width 0.4s ease;
+
+      @media (prefers-reduced-motion: reduce) { transition: none; }
+    }
+  }
+
+  &__detail {
+    margin-top: auto;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    color: var(--muted);
+  }
+}
+
+// --- app grid --------------------------------------------------------------
+
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(21rem, 1fr));
+  gap: 1rem;
+}
+
+.app-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1.1rem 1.15rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--primary) 55%, var(--line));
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-2px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    &:hover { transform: none; }
+  }
+
+  &__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+
+  // Stretched link: the whole card is the hit target, while the endpoint link
+  // and the exceptions link below stay individually clickable (z-index: 1).
+  &__name {
+    font-size: 1.05rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    color: var(--on-surface);
+    word-break: break-word;
+
+    &::after { content: ""; position: absolute; inset: 0; border-radius: var(--radius); }
+    &:hover { text-decoration: none; color: var(--primary); }
+  }
+
+  &__endpoint {
+    position: relative;
+    z-index: 1;
+    align-self: flex-start;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--muted);
+    word-break: break-all;
+
+    &:hover { color: var(--primary); }
+  }
+
+  &__chips {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  &__meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.4rem 0.5rem;
+    margin-top: auto;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--line);
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+
+  .badge, .chip { position: relative; z-index: 1; }
+}

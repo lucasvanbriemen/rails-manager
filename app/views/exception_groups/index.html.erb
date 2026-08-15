@@ -2,30 +2,33 @@
 
 <div class="page-head">
   <div>
-    <h1>Exceptions · <%= @app.name %></h1>
-    <div class="muted"><%= @open_count %> open · <%= @resolved_count %> resolved</div>
+    <h1>Exceptions</h1>
+    <div class="page-head__meta">
+      <%= link_to @app.name, app_path(@app), class: "mono" %>
+      · <%= @open_count %> open · <%= @resolved_count %> resolved
+    </div>
   </div>
   <div class="head-actions">
     <%= button(text: "Open (#{@open_count})", href: app_exception_groups_path(@app), variant: :outline, active: @filter == "open") %>
     <%= button(text: "Resolved (#{@resolved_count})", href: app_exception_groups_path(@app, filter: "resolved"), variant: :outline, active: @filter == "resolved") %>
-    <%= link_to "← Back", app_path(@app), class: "btn" %>
+    <%= button(text: "← Back", href: app_path(@app), variant: :text) %>
   </div>
 </div>
 
 <% if @groups.empty? %>
-  <section class="card">
-    <p class="muted">No <%= @filter %> exceptions<%= " reported yet" if @filter == "open" && @resolved_count.zero? %>.</p>
-  </section>
+  <p class="empty">No <%= @filter %> exceptions<%= " reported yet" if @filter == "open" && @resolved_count.zero? %>.</p>
 <% else %>
   <section class="card">
     <ul class="exceptions">
       <% @groups.each do |group| %>
         <li>
           <%= link_to app_exception_group_path(@app, group) do %>
-            <span class="badge badge--exc-<%= group.status %>"><%= group.status %></span>
-            <strong class="mono"><%= group.exception_class %></strong>
-            <span class="exc-message"><%= truncate(group.message, length: 120) %></span>
-            <span class="muted">×<%= group.events_count %> · last <%= time_ago_in_words(group.last_seen_at) %> ago</span>
+            <span class="exc-head">
+              <%= exception_badge(group.status) %>
+              <span class="exc-class"><%= group.exception_class %></span>
+            </span>
+            <span class="exc-count">×<%= group.events_count %> · <%= time_ago_in_words(group.last_seen_at) %></span>
+            <span class="exc-message"><%= truncate(group.message, length: 160) %></span>
           <% end %>
         </li>
       <% end %>

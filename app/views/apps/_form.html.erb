@@ -1,47 +1,75 @@
-<%= form_with model: app, html: { multipart: true }, builder: CustomFormBuilder do |f| %>
+<%# Deliberately the default form builder, not CustomFormBuilder: the shared
+    floating-label wrapper is a fixed-height bordered box, so the textareas and
+    per-field explanations this form is mostly made of don't fit inside it. %>
+<%= form_with model: app, html: { multipart: true, class: "form" } do |f| %>
   <% if app.errors.any? %>
     <div class="flash flash--alert">
       <%= app.errors.full_messages.to_sentence %>
     </div>
   <% end %>
 
-  <a href="<%= new_app_path(app_kind: app.repo? ? "app" : "repo") %>" class="btn btn--small btn--secondary">
-    Switch to <%= app.repo? ? "Rails app" : "Repo" %>
-  </a>
+  <div class="form-kind">
+    <span>Type: <strong><%= app.repo? ? "Repo (git pull + commands)" : "Rails app (Plesk subdomain)" %></strong></span>
+    <span class="form-kind__spacer"></span>
+    <%= button(text: "Switch to #{app.repo? ? "Rails app" : "Repo"}",
+               href: new_app_path(app_kind: app.repo? ? "app" : "repo"), variant: :outline) %>
+  </div>
 
   <%= f.hidden_field :app_kind %>
-  <p class="hint">
-    Type: <strong><%= app.repo? ? "Repo (git pull + commands)" : "Rails app (Plesk subdomain)" %></strong>
-  </p>
 
-  <%= f.text_field :name, label: "Display name" %>
+  <div class="field">
+    <%= f.label :name, "Display name" %>
+    <%= f.text_field :name %>
+  </div>
 
   <% if app.repo? %>
     <%# ---- plain git repo: pull to a path, run follow-up commands ---- %>
     <fieldset>
       <legend>Git source</legend>
-      <label><span>Repo URL</span><%= f.text_field :git_repo_url, label: false, placeholder: "https://github.com/you/repo.git" %></label>
-      <label><span>Branch</span><%= f.text_field :git_branch, label: false, placeholder: "main" %></label>
+      <div class="field">
+        <%= f.label :git_repo_url, "Repo URL" %>
+        <%= f.text_field :git_repo_url, placeholder: "https://github.com/you/repo.git" %>
+      </div>
+      <div class="field">
+        <%= f.label :git_branch, "Branch" %>
+        <%= f.text_field :git_branch, placeholder: "main" %>
+      </div>
     </fieldset>
 
-    <label><span>Checkout path</span><%= f.text_field :deploy_path, label: false, class: "mono", placeholder: "/var/www/vhosts/ltvb.nl/shared/ui-components" %></label>
-    <p class="hint">Absolute path on the server where this repo is pulled (<code>git reset --hard</code>).</p>
+    <div class="field">
+      <%= f.label :deploy_path, "Checkout path" %>
+      <%= f.text_field :deploy_path, class: "mono", placeholder: "/var/www/vhosts/ltvb.nl/shared/ui-components" %>
+      <p class="field__hint">Absolute path on the server where this repo is pulled (<code>git reset --hard</code>).</p>
+    </div>
 
-    <label><span>Follow-up commands</span><%= f.text_area :post_deploy_commands, rows: 6, class: "mono", placeholder: "npm ci\nnpm run build" %></label>
-    <p class="hint">One command per line, run in order from the checkout path after the pull (login shell, so <code>nvm</code>/<code>node</code> are available). Lines starting with <code>#</code> are ignored.</p>
+    <div class="field">
+      <%= f.label :post_deploy_commands, "Follow-up commands" %>
+      <%= f.text_area :post_deploy_commands, rows: 6, class: "mono", placeholder: "npm ci\nnpm run build" %>
+      <p class="field__hint">One command per line, run in order from the checkout path after the pull (login shell, so <code>nvm</code>/<code>node</code> are available). Lines starting with <code>#</code> are ignored.</p>
+    </div>
 
-    <label><span>.env (optional)</span><%= f.text_area :env_text, rows: 4, class: "mono", placeholder: "KEY=value" %></label>
+    <div class="field">
+      <%= f.label :env_text, ".env (optional)" %>
+      <%= f.text_area :env_text, rows: 4, class: "mono", placeholder: "KEY=value" %>
+    </div>
   <% else %>
     <%# ---- Plesk-served Rails app (original behaviour) ---- %>
     <div class="form-row">
-      <%= f.text_field :subdomain, placeholder: "login", label: "Subdomain" %>
-      <%= f.select :domain, App::WEBSPACE_DOMAINS, { include_blank: false }, label: "Domain" %>
+      <div class="field">
+        <%= f.label :subdomain, "Subdomain" %>
+        <%= f.text_field :subdomain, placeholder: "login" %>
+      </div>
+      <div class="field">
+        <%= f.label :domain, "Domain" %>
+        <%= f.select :domain, App::WEBSPACE_DOMAINS, include_blank: false %>
+      </div>
     </div>
-    <label class="checkbox">
+
+    <div class="field--check">
       <%= f.check_box :apex_confirmed %>
-      <span>This app is the domain itself (apex site)</span>
-    </label>
-    <p class="hint">
+      <%= f.label :apex_confirmed, "This app is the domain itself (apex site)" %>
+    </div>
+    <p class="field__hint">
       Six of the live hostnames are apex domains: leave the subdomain blank and tick this.
       They are served from the webspace's <code><%= App::APEX_WWW_DIR %>/</code> directory —
       Plesk never creates a <code>&lt;domain&gt;/&lt;domain&gt;/</code> one. Both signals are
@@ -50,105 +78,149 @@
       over the apex site's files.
     </p>
 
-    <%= f.text_field :ruby_version, placeholder: "3.3.8", label: "Ruby version" %>
-
-    <label><span>Document root suffix</span><%= f.text_field :doc_root_suffix, label: false, class: "mono", placeholder: "public" %></label>
-    <p class="hint">
-      Relative to the app directory. Rails and Laravel serve from <code>public</code>;
-      a plain PHP or static site leaves this blank. Pointing a site at a
-      <code>public/</code> it doesn't have is the misconfiguration this tool exists to prevent.
-    </p>
-
     <div class="form-row">
-      <label><span>Primary DB</span><%= f.select :primary_db_kind, App::PRIMARY_DB_KINDS %></label>
+      <div class="field">
+        <%= f.label :ruby_version, "Ruby version" %>
+        <%= f.text_field :ruby_version, class: "mono", placeholder: "3.3.8" %>
+      </div>
+      <div class="field">
+        <%= f.label :primary_db_kind, "Primary DB" %>
+        <%= f.select :primary_db_kind, App::PRIMARY_DB_KINDS %>
+        <p class="field__hint">Choose <code>external</code> if the primary DB is a shared/remote DB (e.g. MySQL). The deploy will never auto-migrate it.</p>
+      </div>
     </div>
-    <p class="hint">Choose <code>external</code> if the primary DB is a shared/remote DB (e.g. MySQL). The deploy will never auto-migrate it.</p>
+
+    <div class="field">
+      <%= f.label :doc_root_suffix, "Document root suffix" %>
+      <%= f.text_field :doc_root_suffix, class: "mono", placeholder: "public" %>
+      <p class="field__hint">
+        Relative to the app directory. Rails and Laravel serve from <code>public</code>;
+        a plain PHP or static site leaves this blank. Pointing a site at a
+        <code>public/</code> it doesn't have is the misconfiguration this tool exists to prevent.
+      </p>
+    </div>
 
     <fieldset>
       <legend>Git source</legend>
-      <label><span>Repo URL</span><%= f.text_field :git_repo_url, label: false, placeholder: "https://github.com/you/app.git" %></label>
-      <label><span>Branch</span><%= f.text_field :git_branch, label: false, placeholder: "main" %></label>
+      <div class="field">
+        <%= f.label :git_repo_url, "Repo URL" %>
+        <%= f.text_field :git_repo_url, placeholder: "https://github.com/you/app.git" %>
+      </div>
+      <div class="field">
+        <%= f.label :git_branch, "Branch" %>
+        <%= f.text_field :git_branch, placeholder: "main" %>
+      </div>
     </fieldset>
 
-    <label><span>config/master.key</span><%= f.text_area :master_key, rows: 1, class: "mono", placeholder: "32-char hex (leave blank if app needs no credentials)" %></label>
+    <div class="field">
+      <%= f.label :master_key, "config/master.key" %>
+      <%= f.text_area :master_key, rows: 1, class: "mono", placeholder: "32-char hex (leave blank if app needs no credentials)" %>
+    </div>
 
-    <label><span>.env</span><%= f.text_area :env_text, rows: 6, class: "mono", placeholder: "DB_HOST=...\nDB_DATABASE=..." %></label>
+    <div class="field">
+      <%= f.label :env_text, ".env" %>
+      <%= f.text_area :env_text, rows: 6, class: "mono", placeholder: "DB_HOST=...\nDB_DATABASE=..." %>
+    </div>
 
     <fieldset>
       <legend>Serving</legend>
-      <p class="hint">
+      <p class="field__hint">
         Every field here is rendered into an nginx config that root parses, so each one is a
         typed, validated setting rather than free text — there is deliberately no
         "extra nginx config" box.
       </p>
 
-      <label class="checkbox">
+      <div class="field--check">
         <%= f.check_box :redirect_http %>
-        <span>Redirect http to https</span>
-      </label>
-      <p class="hint">
+        <%= f.label :redirect_http, "Redirect http to https" %>
+      </div>
+      <p class="field__hint">
         On for everything that should only be reachable over TLS. Untick only for a site that
         genuinely serves content on :80 today — turning the redirect on would break it.
       </p>
 
-      <label class="checkbox">
+      <div class="field--check">
         <%= f.check_box :hsts %>
-        <span>Send Strict-Transport-Security</span>
-      </label>
-      <p class="hint">
+        <%= f.label :hsts, "Send Strict-Transport-Security" %>
+      </div>
+      <p class="field__hint">
         Pins browsers to https for <%= NginxConfig::HSTS_MAX_AGE / 86_400 %> days.
         Lowering it later has no effect on anyone who already got it.
       </p>
 
-      <label class="checkbox">
+      <div class="field--check">
         <%= f.check_box :default_server %>
-        <span>Default vhost for unmatched requests</span>
-      </label>
-      <p class="hint">
+        <%= f.label :default_server, "Default vhost for unmatched requests" %>
+      </div>
+      <p class="field__hint">
         Where a request whose SNI/Host matches no other site lands. Exactly one app should have
         this — two make nginx refuse to start, none makes it "whichever block was read first".
       </p>
 
       <div class="form-row">
-        <label><span>Cable path</span><%= f.text_field :cable_path, label: false, class: "mono", placeholder: "/cable" %></label>
-        <label><span>Cable port</span><%= f.number_field :cable_port, placeholder: "28082" %></label>
+        <div class="field">
+          <%= f.label :cable_path, "Cable path" %>
+          <%= f.text_field :cable_path, class: "mono", placeholder: "/cable" %>
+        </div>
+        <div class="field">
+          <%= f.label :cable_port, "Cable port" %>
+          <%= f.number_field :cable_port, placeholder: "28082" %>
+        </div>
       </div>
-      <p class="hint">
+      <p class="field__hint">
         Websocket endpoint. Leave the port blank when the app cables from its own process; set it
         when ActionCable runs as a separate Puma on loopback.
       </p>
 
-      <label><span>X-Accel path</span><%= f.text_field :xaccel_path, label: false, class: "mono", placeholder: "/var/www/vhosts/ltvb.nl/music.ltvb.nl/storage/audio" %></label>
-      <p class="hint">
-        Directory the app may hand out files from. It must then send
-        <code>X-Accel-Redirect: <%= NginxConfig::XACCEL_LOCATION %>&lt;relative path&gt;</code> —
-        a URI, not the absolute path Apache's <code>XSendFile</code> took.
-      </p>
+      <div class="field">
+        <%= f.label :xaccel_path, "X-Accel path" %>
+        <%= f.text_field :xaccel_path, class: "mono", placeholder: "/var/www/vhosts/ltvb.nl/music.ltvb.nl/storage/audio" %>
+        <p class="field__hint">
+          Directory the app may hand out files from. It must then send
+          <code>X-Accel-Redirect: <%= NginxConfig::XACCEL_LOCATION %>&lt;relative path&gt;</code> —
+          a URI, not the absolute path Apache's <code>XSendFile</code> took.
+        </p>
+      </div>
 
-      <label><span>IP allowlist</span><%= f.text_field :ip_allowlist, label: false, class: "mono", placeholder: "62.194.231.108 2001:1c00:9501:6700::/64" %></label>
-      <p class="hint">Space-separated addresses or CIDR blocks. Blank means public. Hostnames are refused.</p>
+      <div class="field">
+        <%= f.label :ip_allowlist, "IP allowlist" %>
+        <%= f.text_field :ip_allowlist, class: "mono", placeholder: "62.194.231.108 2001:1c00:9501:6700::/64" %>
+        <p class="field__hint">Space-separated addresses or CIDR blocks. Blank means public. Hostnames are refused.</p>
+      </div>
     </fieldset>
   <% end %>
 
   <fieldset>
     <legend>Auto-deploy on push</legend>
-    <label class="checkbox">
+
+    <div class="field--check">
       <%= f.check_box :auto_deploy %>
-      <span>Deploy automatically when a matching branch is pushed</span>
-    </label>
-    <label><span>Webhook secret</span><%= f.text_field :webhook_secret, label: false, class: "mono", placeholder: "shared secret — paste the same value into GitHub" %></label>
-    <p class="hint">
-      Required. Pushes are authenticated by an HMAC signature over this secret, not by the
-      URL — so the payload URL alone can't trigger a deploy. Set the same value as the
-      webhook's <strong>Secret</strong> in the repo settings.
-    </p>
-    <label><span>Branch (optional)</span><%= f.text_field :webhook_branch, label: false, placeholder: "defaults to the branch above" %></label>
+      <%= f.label :auto_deploy, "Deploy automatically when a matching branch is pushed" %>
+    </div>
+
+    <div class="field">
+      <%= f.label :webhook_secret, "Webhook secret" %>
+      <%= f.text_field :webhook_secret, class: "mono", placeholder: "shared secret — paste the same value into GitHub" %>
+      <p class="field__hint">
+        Required. Pushes are authenticated by an HMAC signature over this secret, not by the
+        URL — so the payload URL alone can't trigger a deploy. Set the same value as the
+        webhook's <strong>Secret</strong> in the repo settings.
+      </p>
+    </div>
+
+    <div class="field">
+      <%= f.label :webhook_branch, "Branch (optional)" %>
+      <%= f.text_field :webhook_branch, placeholder: "defaults to the branch above" %>
+    </div>
   </fieldset>
 
-  <label><span>Notes</span><%= f.text_area :notes, rows: 2 %></label>
+  <div class="field">
+    <%= f.label :notes, "Notes" %>
+    <%= f.text_area :notes, rows: 2 %>
+  </div>
 
   <div class="form-actions">
-    <%= f.submit (app.new_record? ? (app.repo? ? "Create & deploy repo" : "Create & deploy") : "Save"), class: "btn btn--primary" %>
-    <%= link_to "Cancel", (app.new_record? ? root_path : app_path(app)), class: "btn" %>
+    <%= button(text: (app.new_record? ? (app.repo? ? "Create & deploy repo" : "Create & deploy") : "Save"), type: :submit) %>
+    <%= button(text: "Cancel", href: (app.new_record? ? root_path : app_path(app)), variant: :text) %>
   </div>
 <% end %>

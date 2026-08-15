@@ -1,0 +1,162 @@
+// ---------------------------------------------------------------------------
+// Log / deploy-log / console viewers.
+// ---------------------------------------------------------------------------
+// One panel: a toolbar strip on top, the monospace output below it, sharing a
+// single border so it reads as a terminal window rather than three loose
+// elements stacked on the page.
+
+.viewer {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--sunken);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+
+  .logbox {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+}
+
+.viewer__bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 0.75rem;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+
+  select, input[type="text"] {
+    padding: 0.35rem 0.55rem;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    color: var(--on-surface);
+    font: inherit;
+    font-size: 0.8rem;
+
+    &:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+    }
+  }
+
+  input[type="text"] { min-width: 12rem; flex: 1 1 12rem; }
+
+  // Same caret as the form controls, so the two don't look like two toolkits.
+  select {
+    appearance: none;
+    padding-right: 1.8rem;
+    background-image:
+      linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: right 0.85rem center, right 0.6rem center;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+  }
+
+  // The two selects submit a GET form; contents keeps them in the toolbar row.
+  form { display: contents; }
+}
+
+// "Follow" — a checkbox that reads as a toggle chip.
+.viewer__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  font-size: 0.8rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+
+  input { accent-color: var(--primary); margin: 0; cursor: pointer; }
+
+  &:hover { border-color: var(--outline); color: var(--on-surface); }
+  &:has(input:checked) {
+    border-color: color-mix(in srgb, var(--success) 50%, transparent);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
+    color: var(--on-surface);
+  }
+}
+
+.viewer__meta {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--on-surface) 3%, transparent);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+// --- output ----------------------------------------------------------------
+
+.logbox {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: auto;
+  max-height: 22rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: color-mix(in srgb, var(--on-surface) 88%, transparent);
+  tab-size: 2;
+
+  code { font-size: inherit; background: none; padding: 0; }
+}
+
+.logbox--tall { max-height: min(70vh, 44rem); }
+.logbox:empty::before { content: "— no output yet —"; color: var(--muted); }
+
+// --- console ---------------------------------------------------------------
+
+.console-output { min-height: 40vh; }
+
+.console-input {
+  // flex-direction is explicit: the shared forms sheet makes every <form> a
+  // column, which would stack the prompt on top of the input.
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+
+  &__prompt {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--success);
+  }
+
+  input {
+    flex: 1;
+    padding: 0.4rem 0.5rem;
+    background: var(--sunken);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xs);
+    color: var(--on-surface);
+    font-family: var(--mono);
+    font-size: 0.82rem;
+
+    &:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+    }
+
+    &:disabled { opacity: 0.5; cursor: not-allowed; }
+  }
+}

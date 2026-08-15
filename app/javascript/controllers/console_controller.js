@@ -4,6 +4,9 @@ import { Controller } from "@hotwired/stimulus"
 // transcript (same approach as deploy_log_controller — no websockets), and
 // POSTs submitted commands to the input endpoint. The input is disabled while
 // a command is waiting in the mailbox or once the session has ended.
+// Mirrors ApplicationHelper::CONSOLE_TONES — see deploy_log_controller.
+const TONES = { running: "warn badge--busy", queued: "warn badge--busy", closed: "neutral", failed: "danger" }
+
 export default class extends Controller {
   static targets = ["output", "input", "status", "form"]
   static values = { url: String, inputUrl: String, finished: Boolean, interval: { type: Number, default: 1000 } }
@@ -28,7 +31,7 @@ export default class extends Controller {
       if (atBottom) this.outputTarget.scrollTop = this.outputTarget.scrollHeight
       if (this.hasStatusTarget) {
         this.statusTarget.textContent = data.close_reason ? `${data.status} (${data.close_reason})` : data.status
-        this.statusTarget.className = `badge badge--console-${data.status}`
+        this.statusTarget.className = `badge badge--${TONES[data.status] || "neutral"}`
       }
       this.inputTarget.disabled = data.pending || data.finished
       if (!data.pending && !data.finished && document.activeElement === document.body) this.inputTarget.focus()
