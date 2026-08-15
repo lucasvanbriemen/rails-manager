@@ -162,3 +162,119 @@ details.card > summary { cursor: pointer; }
   white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; color: #cdd3df;
 }
 .logbox--tall { max-height: 70vh; }
+
+/* --- server vitals strip (dashboard) ------------------------------------- */
+/* Status colours (--green/--amber/--red) are reserved for state and are never
+   used for identity. Every meter also prints its percentage, so the reading
+   never depends on colour alone. */
+
+.vitals {
+  margin-bottom: 1.5rem;
+
+  &__grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: 0.75rem;
+  }
+
+  &__stat {
+    background: var(--surface-at-1, var(--panel));
+    border: 1px solid var(--outline-variant, var(--line));
+    border-radius: var(--radius);
+    padding: 0.75rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  &__label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  &__number {
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__detail {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+}
+
+.meter {
+  background: var(--surface-at-1, var(--panel));
+  border: 1px solid var(--outline-variant, var(--line));
+  border-radius: var(--radius);
+  padding: 0.75rem 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+
+  --meter-fill: var(--green);
+  &--warn     { --meter-fill: var(--amber); }
+  &--critical { --meter-fill: var(--red); }
+
+  &__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  &__label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  &__value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  &__track {
+    height: 6px;
+    border-radius: 999px;
+    background: var(--panel-2, var(--line));
+    overflow: hidden;
+
+    i {
+      display: block;
+      height: 100%;
+      border-radius: 999px;
+      background: var(--meter-fill);
+      transition: width 0.3s ease;
+
+      @media (prefers-reduced-motion: reduce) { transition: none; }
+    }
+  }
+
+  &__detail {
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+}
+
+.app__row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.app__meta {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.5rem;
+  font-size: 0.85rem;
+}

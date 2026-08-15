@@ -1,0 +1,69 @@
+<%= generated_header("Postfix main.cf settings — the parameters that must change when Plesk goes.") -%>
+#
+# Not a whole main.cf: only the parameters whose current values name something
+# Plesk owns. Apply with `postconf -e` or append after the existing settings.
+#
+# Why this fragment exists at all: `virtual_transport = plesk_virtual` and the
+# Plesk SASL path die together with the package, and the failure is not a queue
+# — it is a BOUNCE. Postfix still accepts the message (the domain is still in
+# virtual_mailbox_domains), then finds the transport missing and returns it to
+# the sender as undeliverable. Mail is lost, not delayed.
+
+# Maps as PLAINTEXT sources. Each of these is a file a human can read and this
+# manager regenerates; `postmap` derives the .db from it. Plesk's equivalents
+# were Berkeley DB files with no source anywhere on the box, which is the single
+# thing this replatform exists to fix.
+#
+# The domains list is NOT "$virtual_mailbox_maps, hash:..." as Plesk had it.
+# That form makes every domain appearing in vmailbox automatically a final
+# destination, which silently defeats local_delivery: a mailbox row would drag
+# its domain back into the accept list even when the MX points elsewhere.
+virtual_mailbox_domains = hash:<%= path_for("virtual_domains") %>
+virtual_mailbox_maps = hash:<%= path_for("vmailbox") %>
+virtual_alias_maps = hash:<%= path_for("virtual") %>
+
+# Unchanged, and deliberately so: 143 MB of mail already lives here.
+virtual_mailbox_base = <%= MailConfig::MAILDIR_ROOT %>
+virtual_uid_maps = static:<%= MailConfig::VMAIL_UID %>
+virtual_gid_maps = static:<%= MailConfig::VMAIL_GID %>
+
+# Was `plesk_virtual`, a master.cf service that disappears with the package.
+# LMTP into Dovecot rather than Postfix's own `virtual` delivery agent, because
+# `virtual` cannot run Sieve and this server has active Sieve scripts.
+virtual_transport = lmtp:unix:private/dovecot-lmtp
+
+# Was Plesk's saslauthd. Dovecot is already the authentication authority for
+# IMAP/POP3; pointing Postfix at the same socket means one passwd-file governs
+# both, so an account cannot be able to send but not receive.
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sasl_auth_enable = yes
+
+# --- things that must be reviewed by hand, listed rather than rendered -------
+#
+# These reference Plesk paths in the running config and this fragment does NOT
+# silently rewrite them, because each needs a decision rather than a value:
+#
+#   alias_maps                        hash:/var/spool/postfix/plesk/aliases
+#   sender_dependent_default_transport_maps
+#                                     hash:/var/spool/postfix/plesk/sdd_transport_maps
+#   smtpd_sender_restrictions         hash:/var/spool/postfix/plesk/blacklists
+#   tls_server_sni_maps               hash:/var/spool/postfix/plesk/certs
+#   transport_maps                    hash:/var/spool/postfix/plesk/transport
+#   smtpd_milters / non_smtpd_milters inet:127.0.0.1:12768 (Plesk's own milter)
+#
+# sdd_transport_maps is the one with teeth: it binds outbound mail per domain to
+# a specific source IP (lucasvanbriemen.nl and voordezorgmanagement.nl leave via
+# the IPv6 address, the rest via IPv4). Dropping it changes which IP this
+# server's mail appears to come from, which is exactly the thing SPF and every
+# reputation list keys on.
+<% if signing_domains.any? -%>
+#
+# DKIM: <%= signing_domains.size %> domain(s) sign today. The keys are NOT Plesk-owned — they live
+# in <%= MailConfig::DKIM_ROOT %>/<domain>/<selector> and survive the removal — but the milter
+# that USES them is Plesk's, so signing stops until a stock opendkim is pointed
+# at these paths:
+<% signing_domains.each do |domain| -%>
+#   <%= domain[:name] %> (selector <%= domain[:selector] %>) -> <%= domain[:key_path] %>
+<% end -%>
+<% end -%>

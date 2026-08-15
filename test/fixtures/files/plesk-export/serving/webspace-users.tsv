@@ -1,0 +1,8 @@
+login	uid	gid	primary_group	supplementary_groups	home	shell	files_owned_depth6
+lucasvanbriemen.nl_p8c08835y9j	10000	1003	psacln	psacln	/var/www/vhosts/lucasvanbriemen.nl	/bin/bash	42076
+djtim.eu_aqwzxapl85w	10001	1003	psacln	psacln	/var/www/vhosts/djtim.eu	/bin/false	152
+rijschool-mos.nl_gze6m7rrghq	10002	1003	psacln	psacln	/var/www/vhosts/rijschool-mos.nl	/bin/false	707
+voordezorgmanagement._rhc4zy0iyc	10004	1003	psacln	psacln	/var/www/vhosts/voordezorgmanagement.nl	/bin/false	4573
+mos-safeguards.com_eea0inbcx8t	10005	1003	psacln	psacln	/var/www/vhosts/mos-safeguards.com	/bin/false	5705
+ltvb	10006	1003	psacln	psacln	/var/www/vhosts/ltvb.nl	/bin/bash	30063
+roundcube_sysuser	986	1009	roundcube_sysgroup	roundcube_sysgroup	/usr/share/psa-roundcube	/usr/sbin/nologin	0

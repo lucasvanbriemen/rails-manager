@@ -10,6 +10,7 @@ class AppsController < ApplicationController
 
     @status = AppStatusChecker.check(@app) if @app.rails_app?
     @deployments = @app.deployments.limit(20)
+    @deliveries = @app.webhook_deliveries.limit(5)
     @open_exceptions = @app.exception_groups.open_status.recent.limit(5)
     @open_exception_count = @app.exception_groups.open_status.count
   end
@@ -27,7 +28,11 @@ class AppsController < ApplicationController
 
     @app = App.new(app_params)
     if @app.save
-      deployment = @app.deployments.create!(kind: "create", triggered_by: admin_email)
+      # "create" provisions a Plesk subdomain. An apex domain is the webspace —
+      # it already exists, and asking Plesk to create a subdomain with a blank
+      # name is at best an error, so the apex site goes straight to a deploy.
+      kind = @app.apex? ? "deploy" : "create"
+      deployment = @app.deployments.create!(kind: kind, triggered_by: admin_email)
       enqueue(deployment)
       redirect_to app_deployment_path(@app, deployment), notice: "Creating #{@app.fqdn}…"
     else
@@ -53,10 +58,14 @@ class AppsController < ApplicationController
     return forbidden if cannot?(:delete, :apps)
 
     # A repo isn't a Plesk subdomain — just stop tracking it (checkout stays on disk).
-    if @app.repo?
-      label = @app.name
+    # Neither is an apex domain: it IS the webspace, and `remove-subdomain` with a
+    # blank name would be asking Plesk to delete the whole subscription — every
+    # other app under it included. Removing a domain is a Plesk decision, not this
+    # tool's, so the record goes and the hosting stays.
+    if @app.repo? || @app.apex?
+      label = @app.repo? ? @app.name : @app.fqdn
       @app.destroy
-      return redirect_to root_path, notice: "Stopped managing #{label} (on-disk checkout left in place)."
+      return redirect_to root_path, notice: "Stopped managing #{label} (hosting and files left in place)."
     end
 
     result = Plesk.remove_subdomain(@app.subdomain, @app.domain)
@@ -123,7 +132,13 @@ class AppsController < ApplicationController
       :name, :app_kind, :subdomain, :domain, :ruby_version,
       :git_repo_url, :git_branch, :primary_db_kind, :notes,
       :deploy_path, :post_deploy_commands,
-      :master_key, :env_text
+      :master_key, :env_text,
+      :auto_deploy, :webhook_secret, :webhook_branch,
+      # Serving customisations. Each of these is rendered into an nginx config
+      # that root parses; App validates them and NginxConfig validates them
+      # again before writing a byte.
+      :apex_confirmed, :doc_root_suffix, :redirect_http, :hsts, :default_server,
+      :cable_path, :cable_port, :xaccel_path, :ip_allowlist
     )
   end
 end

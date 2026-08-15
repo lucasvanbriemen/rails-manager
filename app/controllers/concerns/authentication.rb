@@ -54,11 +54,29 @@ module Authentication
     params[:auth_token].presence || cookies[:auth_token].presence || request.headers["Authorization"].to_s[/\ABearer (.+)\z/, 1]
   end
 
-  def fetch_account(token)
-    response = Net::HTTP.get_response(URI("#{LOGIN_URL}/session/#{token}"))
-    return nil unless response.is_a?(Net::HTTPOK)
+  # Shape of a token the login app issues. Checked BEFORE the value is put in a
+  # URL: `token` arrives straight off params/cookies/headers from any anonymous
+  # request, so an unvalidated value containing "../" or a query string walks the
+  # path on login.ltvb.nl and makes this server issue an attacker-shaped request
+  # to the SSO on every page load.
+  #
+  # The security property is the CHARACTER SET, not the length: excluding
+  # / ? # % and whitespace is what closes traversal and query injection. The
+  # bounds are only a sanity check, and the lower one is deliberately loose --
+  # login.ltvb.nl issues `SecureRandom.hex(32)` (64 chars) for browser sessions
+  # but also holds at least one hand-made 10-character non-expiring service
+  # token. A 32-char floor would silently reject that integration.
+  TOKEN_FORMAT = /\A[A-Za-z0-9_-]{8,128}\z/
 
-    JSON.parse(response.body)
+  def fetch_account(token)
+    return nil unless token.to_s.match?(TOKEN_FORMAT)
+
+    response = Net::HTTP.get_response(URI("#{LOGIN_URL}/session/#{CGI.escape(token)}"))
+    return nil unless response.is_a?(Net::HTTPOK)
+    return nil unless response["content-type"].to_s.start_with?("application/json")
+
+    account = JSON.parse(response.body)
+    account.is_a?(Hash) && account["email"].present? ? account : nil
   rescue StandardError
     nil
   end

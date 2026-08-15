@@ -1,0 +1,14 @@
+<%= generated_header("Postfix virtual_mailbox_maps — which address is delivered to which Maildir.") -%>
+#
+# Paths are RELATIVE to virtual_mailbox_base (<%= MailConfig::MAILDIR_ROOT %>).
+#
+# The TRAILING SLASH is load bearing. It is the only thing that tells Postfix
+# this is a maildir; without it Postfix appends to a FILE called Maildir, which
+# corrupts delivery and leaves Dovecot unable to read anything. 143 MB of real
+# mail already lives under this layout — it is preserved exactly, not migrated.
+<% mailbox_rows.each do |row| -%>
+<%= row[:address] %>	<%= row[:maildir] %>
+<% end -%>
+<% if mailbox_rows.empty? -%>
+# (no deliverable mailbox)
+<% end -%>

@@ -1,0 +1,56 @@
+# Managed by apps.ltvb.nl — rewritten whenever the ProcessService changes.
+# DO NOT EDIT BY HAND. Rendered from
+# deploy/templates/systemd/process-service.service.erb by SystemdUnit.
+#
+#   install -o root -g root -m 0600 <rendered> \
+#     /etc/systemd/system/<%= @name %>.service
+#   systemctl daemon-reload && systemctl enable --now <%= @name %>
+#
+# Mode 0600 because Environment= lines here carry whatever secrets the worker
+# needs (RAILS_MASTER_KEY, API tokens) and this box has six unrelated webspace
+# users on it. Note that the mode alone does not hide them: systemd republishes
+# Environment= over D-Bus, so anything genuinely secret belongs in a 0600
+# root-owned EnvironmentFile= rather than here.
+#
+# This replaces both the hand-written units and the supervisor programs: four of
+# the seven adopted workers lived in /etc/supervisor/conf.d, which ran them from
+# a `command=` string parsed by supervisor's own shell-ish splitter. Everything
+# below comes from an argv array instead, so quoting bugs cannot become command
+# injection.
+[Unit]
+Description=<%= @description %>
+After=network.target
+
+[Service]
+Type=simple
+User=<%= @user %>
+Group=<%= @group %>
+WorkingDirectory=<%= @working_directory %>
+
+<% @environment.each do |entry| -%>
+Environment=<%= entry %>
+<% end -%>
+
+# One absolute binary plus quoted tokens — no shell, no PATH lookup.
+ExecStart=<%= @exec_start %>
+
+Restart=always
+RestartSec=5
+# Solid Queue and Laravel queue workers finish the job in hand on SIGTERM; the
+# supervisor programs this replaces used stopwaitsecs=30 for the same reason.
+TimeoutStopSec=30
+# supervisor's stopasgroup=true equivalent: kill the whole cgroup, so a worker
+# that forked children (the Laravel queue does) does not leave orphans behind.
+KillMode=control-group
+<% if @memory_max -%>
+
+# A runaway worker gets OOM-killed and restarted rather than taking the box out.
+MemoryMax=<%= @memory_max %>
+<% end -%>
+
+NoNewPrivileges=yes
+<% if @autostart -%>
+
+[Install]
+WantedBy=multi-user.target
+<% end -%>

@@ -1,0 +1,77 @@
+# Managed by apps.ltvb.nl — rewritten on every deploy. DO NOT EDIT BY HAND.
+# Rendered from deploy/templates/systemd/ltvb-app@.service.erb by SystemdUnit.
+#
+#   install -o root -g root -m 0600 <rendered> \
+#     /etc/systemd/system/ltvb-app@<%= @instance %>.service
+#   systemctl daemon-reload && systemctl enable --now ltvb-app@<%= @instance %>
+#
+# Mode 0600 is not cosmetic: the Environment= block below carries
+# RAILS_MASTER_KEY, and six unrelated webspace users share this box. It is also
+# not enough on its own — systemd republishes Environment= over D-Bus, so
+# `systemctl show -p Environment` hands those values to any local user whatever
+# the file mode is. Apache's SetEnv, which this replaces, was root-only. Moving
+# the secrets to a 0600 root-owned EnvironmentFile= is the fix; until then, do
+# not put anything here that is not already needed to boot the app.
+#
+# Why a file per instance rather than one real template unit: systemd looks for
+# the exact unit name before it falls back to instantiating ltvb-app@.service,
+# so `systemctl restart ltvb-app@<%= @instance %>` still reads naturally while
+# each app keeps its own User=, MemoryMax= and Environment=. A true template
+# cannot do that — %i only substitutes into strings, and the six webspaces run
+# under six different uids.
+[Unit]
+Description=<%= @description %>
+After=network.target
+# No Requires=: nothing else on the box depends on this app being up, and a
+# hard dependency would take the web server down with a single failing app.
+
+[Service]
+Type=simple
+User=<%= @user %>
+Group=<%= @group %>
+WorkingDirectory=<%= @working_directory %>
+
+# One runtime directory per app, so a compromised app cannot read or replace
+# another's socket. systemd creates the /run/ltvb-app parent as 0755 root and
+# applies this owner and mode only to the leaf. nginx must be a member of
+# <%= @group %> to traverse it and reach the socket — that group membership is
+# what keeps every other local user out, and it matters: login.ltvb.nl's only
+# protection is an IP allowlist in the vhost, which a world-connectable socket
+# would route straight around.
+RuntimeDirectory=<%= @runtime_directory %>
+RuntimeDirectoryMode=0750
+
+# The unit name contains '@', so by default systemd would park it in
+# system-ltvb\x2dapp.slice and the cgroup path the dashboard reads
+# (/sys/fs/cgroup/system.slice/<unit>.service/memory.current) would not exist.
+Slice=system.slice
+
+<% @environment.each do |entry| -%>
+Environment=<%= entry %>
+<% end -%>
+
+# An absolute interpreter path: no rbenv shim, no `bash -lc`. The three units
+# this replaces all began with `/bin/bash -lc 'export PATH=...; exec bundle ...'`
+# and so resolved their Ruby through whichever profile file was edited last.
+# Every argument here is its own quoted token, so there is no shell for a stored
+# value to escape into.
+ExecStart=<%= @exec_start %>
+
+Restart=always
+RestartSec=5
+# Puma drains in-flight requests on SIGTERM; give it room before SIGKILL.
+TimeoutStopSec=30
+
+# A leaking app gets OOM-killed and restarted instead of taking the other 21
+# hostnames down with it.
+MemoryMax=<%= @memory_max %>
+
+# The app never needs to gain privileges and only writes under /var/www/vhosts.
+# PrivateTmp is deliberately absent: /tmp is shared with the PHP-FPM pools and
+# the X-Sendfile handoff, and a private namespace breaks both in ways that only
+# surface under load.
+NoNewPrivileges=yes
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target

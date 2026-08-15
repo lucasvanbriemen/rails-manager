@@ -1,0 +1,26 @@
+[Unit]
+# The replacement web server, run beside Apache during the migration: it binds
+# 9080/9443 until cutover, so both stacks can be diffed host-by-host on a live
+# box before anything moves off :80/:443.
+Description=ltvb nginx (replacement web tier)
+After=network.target
+
+[Service]
+Type=forking
+# /usr/local/sbin/ltvb-nginx, not /usr/sbin/nginx: the Plesk uninstall removes
+# sw-nginx, which owns /usr/sbin/nginx, mime.types and fastcgi_params. All three
+# are copied out of dpkg's reach so the web tier survives the removal.
+ExecStartPre=/usr/local/sbin/ltvb-nginx -t -c /etc/ltvb/nginx/nginx.conf
+ExecStart=/usr/local/sbin/ltvb-nginx -c /etc/ltvb/nginx/nginx.conf
+# Reload, never restart: a reload keeps the listening sockets open, so a config
+# change does not drop in-flight requests. Re-test first, because nginx exits on
+# a bad config and systemd would then leave every site down.
+ExecReload=/usr/local/sbin/ltvb-nginx -t -c /etc/ltvb/nginx/nginx.conf
+ExecReload=/bin/kill -s HUP $MAINPID
+KillSignal=SIGQUIT
+PIDFile=/run/ltvb-nginx.pid
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,70 @@
+/var/www/vhosts/djtim.eu/error_docs	
+/var/www/vhosts/djtim.eu/httpdocs	composer.json,index.html,php-files
+/var/www/vhosts/djtim.eu/logs	
+/var/www/vhosts/ltvb.nl/ai.ltvb.nl	artisan,composer.json,index.html
+/var/www/vhosts/ltvb.nl/aio.ltvb.nl	Gemfile,.git,ruby=ruby-3.3.8
+/var/www/vhosts/ltvb.nl/apps.ltvb.nl	Gemfile,.git,ruby=ruby-3.3.8
+/var/www/vhosts/ltvb.nl/error_docs	
+/var/www/vhosts/ltvb.nl/git.ltvb.nl	Gemfile,.git,ruby=ruby-3.3.8
+/var/www/vhosts/ltvb.nl/git	
+/var/www/vhosts/ltvb.nl/httpdocs	index.html
+/var/www/vhosts/ltvb.nl/login.ltvb.nl	Gemfile,ruby=ruby-3.3.8
+/var/www/vhosts/ltvb.nl/logs	
+/var/www/vhosts/ltvb.nl/mail.ltvb.nl	Gemfile,.git,ruby=ruby-3.3.8
+/var/www/vhosts/ltvb.nl/music.ltvb.nl.laravel-leftovers	index.html
+/var/www/vhosts/ltvb.nl/music.ltvb.nl	Gemfile,.git,ruby=ruby-3.3.8
+/var/www/vhosts/ltvb.nl/sandbox.ltvb.nl	Gemfile,ruby=ruby-3.3.8
+/var/www/vhosts/ltvb.nl/senne.ltvb.nl	artisan,composer.json,index.html,public/index.php
+/var/www/vhosts/ltvb.nl/site1	index.html
+/var/www/vhosts/ltvb.nl/site2	index.html
+/var/www/vhosts/ltvb.nl/site3	index.html
+/var/www/vhosts/ltvb.nl/ui-components.laravel-wrong.bak	artisan,composer.json,public/index.php,.git
+/var/www/vhosts/ltvb.nl/ui-components	.git
+/var/www/vhosts/lucasvanbriemen.nl/agent.lucasvanbriemen.nl	artisan,composer.json,index.html
+/var/www/vhosts/lucasvanbriemen.nl/ai.lucasvanbriemen.nl	php-files
+/var/www/vhosts/lucasvanbriemen.nl/all.lucasvanbriemen.nl	artisan,composer.json,index.html
+/var/www/vhosts/lucasvanbriemen.nl/bin	
+/var/www/vhosts/lucasvanbriemen.nl/calendar.lucasvanbriemen.nl	artisan,composer.json,index.html
+/var/www/vhosts/lucasvanbriemen.nl/components.lucasvanbriemen.nl	artisan,composer.json,public/index.php
+/var/www/vhosts/lucasvanbriemen.nl/database.lucasvanbriemen.nl	artisan,composer.json,index.html
+/var/www/vhosts/lucasvanbriemen.nl/dev	
+/var/www/vhosts/lucasvanbriemen.nl/email.lucasvanbriemen.nl	artisan,composer.json
+/var/www/vhosts/lucasvanbriemen.nl/error_docs	
+/var/www/vhosts/lucasvanbriemen.nl/etc	
+/var/www/vhosts/lucasvanbriemen.nl/git	
+/var/www/vhosts/lucasvanbriemen.nl/github.lucasvanbriemen.nl	artisan,composer.json,index.html,public/index.php
+/var/www/vhosts/lucasvanbriemen.nl/httpdocs	index.html
+/var/www/vhosts/lucasvanbriemen.nl/lib	
+/var/www/vhosts/lucasvanbriemen.nl/lib64	
+/var/www/vhosts/lucasvanbriemen.nl/login.lucasvanbriemen.nl	artisan,composer.json
+/var/www/vhosts/lucasvanbriemen.nl/logs	
+/var/www/vhosts/lucasvanbriemen.nl/tmp	
+/var/www/vhosts/lucasvanbriemen.nl/todo.lucasvanbriemen.nl	artisan,composer.json,index.html
+/var/www/vhosts/lucasvanbriemen.nl/usr	
+/var/www/vhosts/lucasvanbriemen.nl/var	
+/var/www/vhosts/mos-safeguards.com.unremoved_data/httpdocs	
+/var/www/vhosts/mos-safeguards.com/admin.mos-safeguards.com	index.html
+/var/www/vhosts/mos-safeguards.com/error_docs	
+/var/www/vhosts/mos-safeguards.com/git	
+/var/www/vhosts/mos-safeguards.com/httpdocs	artisan,composer.json,index.html,public/index.php
+/var/www/vhosts/mos-safeguards.com/logs	
+/var/www/vhosts/rijschool-mos.nl/admin.rijschool-mos.nl	composer.json,index.php,php-files
+/var/www/vhosts/rijschool-mos.nl/bin	
+/var/www/vhosts/rijschool-mos.nl/dev	
+/var/www/vhosts/rijschool-mos.nl/error_docs	
+/var/www/vhosts/rijschool-mos.nl/etc	
+/var/www/vhosts/rijschool-mos.nl/git	
+/var/www/vhosts/rijschool-mos.nl/httpdocs	index.html
+/var/www/vhosts/rijschool-mos.nl/lib	
+/var/www/vhosts/rijschool-mos.nl/lib64	
+/var/www/vhosts/rijschool-mos.nl/login.rijschool-mos.nl	composer.json,index.php,php-files
+/var/www/vhosts/rijschool-mos.nl/logs	
+/var/www/vhosts/rijschool-mos.nl/student.rijschool-mos.nl	composer.json,index.php,index.html,php-files
+/var/www/vhosts/rijschool-mos.nl/tmp	
+/var/www/vhosts/rijschool-mos.nl/usr	
+/var/www/vhosts/rijschool-mos.nl/var	
+/var/www/vhosts/voordezorgmanagement.nl/error_docs	
+/var/www/vhosts/voordezorgmanagement.nl/git	
+/var/www/vhosts/voordezorgmanagement.nl/httpdocs	artisan,composer.json,index.html,public/index.php
+/var/www/vhosts/voordezorgmanagement.nl/logs	
+/usr/share/psa-roundcube	index.php,php-files

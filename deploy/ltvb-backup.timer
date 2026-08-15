@@ -1,0 +1,23 @@
+# Nightly, and Persistent so a night the box was off is caught up rather than
+# skipped — the retention schedule is written in "the newest run in each of the
+# 7 most recent days that HAS one" for the same reason.
+#
+# 03:30 UTC: after the traffic, and well clear of 06:25 when Plesk's own
+# /etc/cron.daily/50plesk-daily still runs — two dumps of the same 18 GB
+# database at once is a load spike, not a backup strategy.
+[Unit]
+Description=Nightly ltvb backup
+# Without this the timer sits enabled and fires nothing, which looks exactly
+# like a working backup system.
+Requires=ltvb-backup.service
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+# The dump is the heaviest IO this box does; a fixed minute across reboots is
+# fine, a jittered start avoids landing on top of certbot's renew timer.
+RandomizedDelaySec=10m
+Persistent=true
+Unit=ltvb-backup.service
+
+[Install]
+WantedBy=timers.target

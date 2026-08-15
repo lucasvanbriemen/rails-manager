@@ -82,6 +82,55 @@
   </section>
 
   <section class="card">
+    <h2>
+      Auto-deploy
+      <% if @app.auto_deploy? %>
+        <span class="badge badge--rails">on</span>
+      <% else %>
+        <span class="badge">off</span>
+      <% end %>
+    </h2>
+
+    <dl class="kv">
+      <dt>Payload URL</dt>
+      <dd class="mono break"><%= api_webhook_url(token: @app.webhook_token) %></dd>
+      <dt>Content type</dt><dd class="mono">application/json</dd>
+      <dt>Secret</dt>
+      <dd>
+        <% if @app.webhook_secret.present? %>
+          set — <span class="muted">pushes are only accepted with a matching signature</span>
+        <% else %>
+          <span class="badge badge--error5xx">not set</span>
+          <span class="muted">— every delivery is rejected until you add one in Edit</span>
+        <% end %>
+      </dd>
+      <dt>Branch</dt>
+      <dd><code><%= @app.webhook_branch.presence || @app.git_branch %></code></dd>
+    </dl>
+
+    <% if @deliveries.present? %>
+      <ul class="deploys">
+        <% @deliveries.each do |d| %>
+          <li>
+            <span class="badge badge--dep-<%= d.status == 'deployed' ? 'succeeded' : 'queued' %>"><%= d.status %></span>
+            <strong class="mono"><%= d.short_sha.presence || d.event %></strong>
+            <span class="muted">
+              <%= d.branch.presence %>
+              <%= "· #{d.pusher}" if d.pusher.present? %>
+              · <%= time_ago_in_words(d.created_at) %> ago
+            </span>
+            <% if d.message.present? %>
+              <div class="muted"><%= d.message %></div>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
+    <% else %>
+      <p class="muted">No deliveries received yet.</p>
+    <% end %>
+  </section>
+
+  <section class="card">
     <h2>Recent deployments</h2>
     <% if @deployments.empty? %>
       <p class="muted">No deployments yet.</p>

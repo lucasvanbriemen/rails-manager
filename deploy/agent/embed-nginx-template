@@ -1,0 +1,64 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Copies deploy/templates/nginx/nginx-site.erb into ltvb-agentd's built-in
+# template table.
+#
+# The agent renders the INSTALLED template at /etc/ltvb/agent/templates when one
+# is there and falls back to a copy compiled into the daemon when it is not, so
+# a box that has only had the daemon installed still serves sites. That fallback
+# is a second copy of the config text, and a second copy is what this whole
+# consolidation exists to remove — so it is generated from the one authored file
+# rather than maintained beside it, and agent_protocol_test.rb fails the suite if
+# the two ever differ.
+#
+#   ruby deploy/agent/embed-nginx-template            # rewrite in place
+#   ruby deploy/agent/embed-nginx-template --check    # exit 1 if stale
+
+ROOT     = File.expand_path("../..", __dir__)
+AGENT    = File.join(ROOT, "deploy/agent/ltvb-agentd")
+TEMPLATE = File.join(ROOT, "deploy/templates/nginx/nginx-site.erb")
+
+# The daemon is one file with no build step, so the marked region is the only
+# thing that says "do not edit this by hand" in a way a reader can act on.
+BEGIN_MARK = "      # ---- BEGIN GENERATED from deploy/templates/nginx/nginx-site.erb ----"
+END_MARK   = "      # ---- END GENERATED ----"
+
+# Eight spaces on every non-blank line, none on a blank one: <<~ strips the
+# smallest indentation it finds across non-blank lines, so a stray space on an
+# "empty" line would change what gets stripped from every other line.
+def embedded(source)
+  body = source.lines.map { |line| line.strip.empty? ? "\n" : "        #{line}" }.join
+  <<~RUBY.chomp
+    #{BEGIN_MARK}
+          # Regenerate with `ruby deploy/agent/embed-nginx-template` after editing
+          # the template. The manager renders the same file for its previews and
+          # its tests, which is what makes a test failure here mean the config
+          # this daemon writes is wrong.
+          "nginx-site" => <<~'ERB',
+    #{body.chomp}
+          ERB
+    #{END_MARK}
+  RUBY
+end
+
+agent  = File.read(AGENT)
+source = File.read(TEMPLATE)
+
+# A template that could never be embedded (its own terminator inside it) has to
+# fail here rather than produce a daemon that does not parse.
+abort "#{TEMPLATE}: contains a heredoc terminator line" if source.lines.any? { |l| l.chomp == "ERB" }
+
+first = agent.index(BEGIN_MARK)
+last  = agent.index(END_MARK)
+abort "#{AGENT}: BEGIN/END GENERATED markers not found" unless first && last && last > first
+
+updated = agent[0...first] + embedded(source) + agent[(last + END_MARK.length)..]
+
+if ARGV.include?("--check")
+  abort "#{AGENT} is stale; run: ruby deploy/agent/embed-nginx-template" unless updated == agent
+  puts "#{AGENT}: built-in nginx-site matches #{TEMPLATE}"
+else
+  File.write(AGENT, updated)
+  puts "#{AGENT}: embedded #{source.bytesize} bytes from #{TEMPLATE}"
+end

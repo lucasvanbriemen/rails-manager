@@ -1,0 +1,41 @@
+<%= generated_header("Dovecot passwd-file — used as BOTH passdb and userdb.") -%>
+#
+# Format, and the reason this file is validated character by character:
+#
+#   user:password:uid:gid:gecos:home:shell:extra_fields
+#
+# The separator is ":", not newline. A ":" smuggled into a local part does not
+# corrupt one field, it SHIFTS every field after it — and two positions along is
+# the numeric uid. MailConfig rejects ":", "=", ",", whitespace and "#" in every
+# field for exactly this reason.
+#
+# uid/gid are popuser:popuser (<%= MailConfig::VMAIL_UID %>:<%= MailConfig::VMAIL_GID %>), written from constants and never from a
+# column: which uid Dovecot reads and writes files as is not a per-mailbox
+# decision, and the 143 MB already on disk is owned by exactly this pair.
+#
+# EVERY active mailbox on an active domain has a line here, credential or not,
+# because this file is the userdb as well as the passdb: Postfix delivers over
+# LMTP, Dovecot answers a userdb miss with a permanent 5.1.1, and Postfix has
+# already accepted the message by then — a missing line is a BOUNCE, not a
+# login failure.
+#
+# A mailbox with no credential yet gets <%= MailConfig::NO_PASSWORD %> in the password field. No
+# password can produce that, so it fails closed; an EMPTY field is deliberately
+# not used, because empty is a credential question and this is not. All nine
+# accounts start without a credential — six shared one password and one was used
+# to relay ~12k phishing messages, so the migration is a reset, not a copy.
+#
+# Install 0640 root:dovecot. It holds password digests.
+<% if credential_less_rows.any? -%>
+#
+# <%= credential_less_rows.size %> of the accounts below cannot authenticate until someone resets them:
+<% credential_less_rows.each do |row| -%>
+#   <%= row[:address] %>
+<% end -%>
+<% end -%>
+<% passwd_rows.each do |row| -%>
+<%= row[:address] %>:<%= row[:password] %>:<%= MailConfig::VMAIL_UID %>:<%= MailConfig::VMAIL_GID %>::<%= row[:home] %>::<%= row[:extra].join(" ") %>
+<% end -%>
+<% if passwd_rows.empty? -%>
+# (no active mailbox on any active domain)
+<% end -%>

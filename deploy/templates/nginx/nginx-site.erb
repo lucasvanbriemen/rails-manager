@@ -1,0 +1,289 @@
+# Generated from nginx-site.erb — do not edit by hand; edit the App and
+# re-render. Requires the shared http{} config (log format, scrub maps, TLS
+# session zone) to be included before this file.
+#
+# <%= fqdn %> | kind: <%= kind %> | <%= staging ? "staging" : "live" %> (<%= http_port %>/<%= https_port %>)
+<%
+  # Derived here rather than by the caller. This file is rendered from two
+  # places — the agent, which writes the served config, and the manager, which
+  # previews and tests it — and anything the two compute separately is a thing
+  # they can eventually compute differently. That drift is what this template
+  # exists to make impossible, so it keeps every derivation it can.
+
+  # With tls off there is nowhere to redirect TO, so redirect_http is ignored
+  # rather than obeyed into a loop.
+  redirect = tls && redirect_http
+
+  # Staging has to name its own port or the redirect bounces the browser
+  # straight back to live Apache, which is exactly what staging is testing.
+  https_suffix = staging ? ":#{https_port}" : ""
+
+  listen_arg = lambda do |port, ssl:, ipv6:|
+    parts = [ ipv6 ? "[::]:#{port}" : port.to_s ]
+    parts << "default_server" if default_server
+    parts << "ssl" if ssl
+    parts.join(" ")
+  end
+-%>
+<% (tls ? [ false, true ] : [ false ]).each do |https| -%>
+
+server {
+    listen <%= listen_arg.call(https ? https_port : http_port, ssl: https, ipv6: false) %>;
+    # IPv6 is not implied by the IPv4 listen. mos-safeguards.com served HTTPS on
+    # v4 only for eight months because this line was missing from its vhost, and
+    # every dual-stack client silently got a connection refused.
+    listen <%= listen_arg.call(https ? https_port : http_port, ssl: https, ipv6: true) %>;
+<% if https -%>
+    http2 on;
+<% end -%>
+
+    server_name <%= fqdn %>;
+<% if https -%>
+
+    ssl_certificate     <%= cert_dir %>/fullchain.pem;
+    ssl_certificate_key <%= cert_dir %>/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    # The client's preference order is the better one on TLS 1.3 hardware: it
+    # knows whether it has AES acceleration and we do not.
+    ssl_prefer_server_ciphers off;
+
+    # No ssl_stapling. Let's Encrypt retired its OCSP responder, so there is
+    # nothing to staple, and turning it on would make every worker depend on a
+    # resolver being reachable — a dependency that fails closed at reload time.
+<% end -%>
+
+    # Per-site logs, split out of Plesk's shared /var/www/vhosts/system tree so a
+    # site's logs survive the domain being reconfigured and can be rotated per
+    # app. ltvb_scrubbed drops ?auth_token= before anything is written.
+    access_log <%= log_dir %>/<%= log_prefix %>access.log ltvb_scrubbed;
+    error_log  <%= log_dir %>/<%= log_prefix %>error.log warn;
+
+    # nginx defaults to 1m and returns 413 with nothing in the app's log. Apache
+    # had no limit here, so music.ltvb.nl's uploads would start failing on
+    # cutover.
+    client_max_body_size <%= client_max_body %>;
+<% if https && hsts -%>
+
+    # `always` or nginx omits it on error responses, which is where a downgrade
+    # would be attempted.
+    add_header Strict-Transport-Security "max-age=<%= hsts_max_age %>; includeSubDomains" always;
+<% end -%>
+<% unless allow.empty? -%>
+
+    # IP allowlist. These are server-level, so they are inherited by every
+    # location that does not declare its own allow/deny — which is how the
+    # acme-challenge location below opts back out without needing to be ordered
+    # first.
+<% allow.each do |entry| -%>
+    allow <%= entry %>;
+<% end -%>
+    deny all;
+<% end -%>
+
+    # http-01 renewal has to work on an IP-restricted site and on a site that
+    # redirects everything to https, so it is a location of its own that re-opens
+    # access explicitly (nginx inherits allow/deny only into levels that declare
+    # none of their own). `^~` so it also wins over the dotfile regex below —
+    # the challenge path is literally a dotfile directory.
+    location ^~ /.well-known/acme-challenge/ {
+        allow all;
+        root <%= acme_root %>;
+    }
+<% if redirect && !https -%>
+
+    location / {
+        return 301 https://$host<%= https_suffix %>$request_uri;
+    }
+<% else -%>
+
+    root <%= docroot %>;
+
+    # Plesk denied dotfiles only under the challenge directory, but Apache's
+    # stock config denies .ht* everywhere — which the staging stack did not, and
+    # .htaccess came back 200 on mos-safeguards.com and voordezorgmanagement.nl
+    # while Apache answered 403. Generalise it: a .git, .env or .htaccess that
+    # lands in a document root must never be served. First regex location, so it
+    # wins over the PHP handler below; the lookahead keeps /.well-known/
+    # (security.txt, apple-app-site-association) reachable.
+    location ~ /\.(?!well-known/) {
+        deny all;
+    }
+<% unless xaccel_root.empty? -%>
+
+    # Apache's XSendFile, ported. The difference matters: XSendFile took a real
+    # filesystem path in the response header, X-Accel-Redirect takes a URI. The
+    # app must emit `X-Accel-Redirect: <%= xaccel_location %><relative path>`, NOT the
+    # absolute path it sends today. `internal` means the outside world cannot
+    # request this prefix directly — the app is still the only thing that can
+    # authorise a file.
+    location <%= xaccel_location %> {
+        internal;
+        alias <%= xaccel_root %>/;
+    }
+<% end -%>
+<% unless cable_path.empty? -%>
+
+    # Websocket endpoint. Apache forced HTTP/1.1 for the whole vhost to make this
+    # work; nginx does not need that — the proxy leg is always HTTP/1.1
+    # regardless of the client's protocol, and 1.25+ handles websockets over
+    # HTTP/2 itself.
+    location <%= cable_path %> {
+        proxy_pass <%= cable_upstream %>;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        # $ltvb_connection_upgrade, not a literal "upgrade": Connection must say
+        # upgrade only when the client asked for it and close otherwise, or
+        # keepalive breaks for every ordinary request sharing the connection.
+        proxy_set_header Connection $ltvb_connection_upgrade;
+        proxy_set_header Host       $host;
+        proxy_set_header X-Real-IP  $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # An idle socket is normal here; the 60s default would cull every quiet
+        # tab.
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        # Buffering a stream defeats the point of the stream.
+        proxy_buffering off;
+    }
+<% end -%>
+<% if kind == "rails" -%>
+
+    index index.html;
+
+    # Sprockets/Propshaft names are content-hashed, so a stale answer is
+    # impossible and these never need to reach Puma. `expires` rather than
+    # `add_header Cache-Control`: an add_header in a location replaces the whole
+    # inherited set, which would silently drop the HSTS header on exactly the
+    # requests a browser makes most often.
+    location /assets/ {
+        expires 1y;
+        access_log off;
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri @app;
+    }
+
+    # Puma listens on a unix socket owned by ltvb-app@<%= fqdn %>.service. A socket
+    # rather than a loopback port so the filesystem permissions decide who may
+    # talk to the app, and so two apps can never collide on a port number.
+    location @app {
+        proxy_pass http://unix:<%= app_socket %>:;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        # Rails' force_ssl and url_for read this. On the :80 block of a site that
+        # legitimately serves plain http, $scheme is "http" and Rails must be
+        # told the truth or it builds https URLs for a request that arrived over
+        # http.
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        # Redirects the app emits point at the socket URL otherwise.
+        proxy_redirect off;
+        proxy_read_timeout 120s;
+    }
+<% elsif kind == "laravel" || kind == "php" -%>
+
+    # index.html BEFORE index.php, matching this server's Apache DirectoryIndex
+    # ("index.html" "index.cgi" "index.pl" "index.php" ...). The staging
+    # comparison caught this: student.rijschool-mos.nl ships both, Apache serves
+    # the .html and nginx served the .php, which redirected to a login page.
+    # Whichever order is "better" in the abstract, a migration that silently
+    # changes which page a site serves is a regression.
+    index index.html index.php;
+
+    location / {
+<% if kind == "laravel" -%>
+        # Laravel's stock public/.htaccess front controller. nginx does not read
+        # .htaccess at all, so leaving this out gives a working homepage and a
+        # 404 on every other route — which looks like an app bug.
+        try_files $uri $uri/ /index.php?$query_string;
+<% else -%>
+        # No front controller: a request that names no real file is a 404, not a
+        # rewrite. These sites have no router to hand it to.
+        try_files $uri $uri/ =404;
+<% end -%>
+    }
+
+    # PHP-FPM. The pool is Plesk's, one per domain, running as the webspace owner
+    # with its own open_basedir — that stays as it is; only the web server in
+    # front of it changes.
+    #
+    # The fastcgi_param list is written out rather than `include fastcgi_params`:
+    # that file belongs to Plesk's sw-nginx package, and this config has to keep
+    # working after that package is removed.
+    location ~ [^/]\.php(/|$) {
+        fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+        # try_files resets $fastcgi_path_info, so stash it first. Documented
+        # nginx behaviour, and the reason PATH_INFO silently goes empty in most
+        # copied configs.
+        set $ltvb_path_info $fastcgi_path_info;
+        # The whole point of this line: without it, /uploads/photo.jpg/x.php
+        # hands FPM a SCRIPT_FILENAME that resolves to the uploaded image and
+        # executes it.
+        try_files $fastcgi_script_name =404;
+
+        fastcgi_pass unix:<%= fpm_socket %>;
+
+        fastcgi_param SCRIPT_FILENAME   $document_root$fastcgi_script_name;
+        fastcgi_param SCRIPT_NAME       $fastcgi_script_name;
+        fastcgi_param PATH_INFO         $ltvb_path_info;
+        fastcgi_param PATH_TRANSLATED   $document_root$ltvb_path_info;
+        fastcgi_param DOCUMENT_ROOT     $document_root;
+        fastcgi_param DOCUMENT_URI      $document_uri;
+        fastcgi_param REQUEST_URI       $request_uri;
+        fastcgi_param REQUEST_METHOD    $request_method;
+        fastcgi_param QUERY_STRING      $query_string;
+        fastcgi_param CONTENT_TYPE      $content_type;
+        fastcgi_param CONTENT_LENGTH    $content_length;
+        fastcgi_param SERVER_PROTOCOL   $server_protocol;
+        fastcgi_param SERVER_NAME       $server_name;
+        fastcgi_param SERVER_ADDR       $server_addr;
+        fastcgi_param SERVER_PORT       $server_port;
+        fastcgi_param SERVER_SOFTWARE   nginx;
+        fastcgi_param GATEWAY_INTERFACE CGI/1.1;
+        fastcgi_param REMOTE_ADDR       $remote_addr;
+        fastcgi_param REMOTE_PORT       $remote_port;
+        fastcgi_param REQUEST_SCHEME    $scheme;
+        # if_not_empty: PHP treats HTTPS as on whenever the variable exists at
+        # all, so passing an empty string would make every plain-http request
+        # look secure.
+        fastcgi_param HTTPS             $https if_not_empty;
+        # Without this, a pool built with security.limit_extensions refuses to
+        # run.
+        fastcgi_param REDIRECT_STATUS   200;
+        # httpoxy. A request carrying a Proxy header becomes HTTP_PROXY in the
+        # CGI environment, which several HTTP client libraries then obey. Plesk's
+        # fastcgi_params blanked it; this list has to as well.
+        fastcgi_param HTTP_PROXY        "";
+
+        fastcgi_hide_header X-Powered-By;
+        # Laravel sessions and long Set-Cookie headers overflow the 4k default
+        # and surface as an upstream-sent-too-big-header 502.
+        fastcgi_buffer_size 32k;
+        fastcgi_buffers 16 16k;
+        fastcgi_read_timeout 300s;
+    }
+<% elsif kind == "static" -%>
+
+    index index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # Without a PHP handler nginx would serve a .php file as plain text — turning
+    # a stray script from "not executed" into "source code published". 404
+    # instead.
+    location ~ [^/]\.php(/|$) {
+        return 404;
+    }
+<% end -%>
+<% end -%>
+}
+<% end -%>

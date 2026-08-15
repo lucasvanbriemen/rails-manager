@@ -1,0 +1,85 @@
+# ltvb-agentd — the root privilege boundary for apps.ltvb.nl.
+#
+# Installed by root, deliberately. Nothing in an app deploy touches this unit or
+# the binary it starts: the manager can rewrite its own checkout, so an agent
+# the checkout could replace would not be a boundary at all.
+#
+#   install -o root -g root -m 0700 deploy/agent/ltvb-agentd /usr/local/sbin/ltvb-agentd
+#   install -o root -g root -m 0644 deploy/agent/ltvb-agent.service /etc/systemd/system/ltvb-agent.service
+#   systemctl daemon-reload && systemctl enable --now ltvb-agent
+#
+# See deploy/agent/README.md for the accounts, group and config files this
+# expects to already exist.
+
+[Unit]
+Description=ltvb privileged agent (root operations for apps.ltvb.nl)
+Documentation=file:///usr/local/share/doc/ltvb-agent/README.md
+# Not After=network.target: the agent must be answering before the manager's
+# worker starts, and it needs no network to do so. http.check dials loopback.
+After=local-fs.target
+Before=ltvb-apps-jobs.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Refuses to start on a config the agent cannot fully resolve — an unknown
+# allowed_user, a missing socket group, a verb in the schema with no handler.
+# Failing here is a systemd alert; failing later is a deploy that mysteriously
+# 500s at 2am.
+ExecStartPre=/usr/local/sbin/ltvb-agentd --check
+ExecStart=/usr/local/sbin/ltvb-agentd
+# SIGHUP re-reads webspaces.json and agent.json in place. A restart would drop
+# the socket, and anything mid-deploy with it.
+ExecReload=/bin/kill -HUP $MAINPID
+
+# /run/ltvb-agent holds the flock file; the socket itself lives at
+# /run/ltvb-agent.sock (see SOCKET_PATH) so its path does not change if this
+# directory is ever renamed.
+RuntimeDirectory=ltvb-agent
+RuntimeDirectoryMode=0755
+# 0750 root:root — the audit log records which secrets were installed, by
+# digest. Nobody but root reads it.
+LogsDirectory=ltvb-agent
+LogsDirectoryMode=0750
+
+Restart=always
+RestartSec=2
+
+# Hardening. Everything here is a capability the agent genuinely does not need;
+# what it DOES need (writing /etc/nginx, /etc/systemd/system, /var/www/vhosts,
+# running systemctl) rules out ProtectSystem=strict, so this list is what is
+# left rather than a copy of a generic template.
+NoNewPrivileges=yes
+PrivateTmp=yes
+# read-only, not yes: the Plesk migration state lives in /root/plesk-export and
+# ProtectHome=yes would hide it, which is a surprise waiting for whichever verb
+# first needs to read it.
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# AF_UNIX for the socket, AF_INET/AF_INET6 for http.check over loopback.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# A root daemon must not inherit a Ruby load path or gem home from anywhere.
+# The shebang is /usr/bin/ruby (absolute, not `env`) for the same reason: an
+# rbenv shim on PATH must never be able to decide which interpreter runs as root.
+Environment=RUBYOPT=
+Environment=RUBYLIB=
+Environment=GEM_HOME=
+Environment=GEM_PATH=
+
+[Install]
+WantedBy=multi-user.target

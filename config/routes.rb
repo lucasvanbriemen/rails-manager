@@ -24,5 +24,9 @@ Rails.application.routes.draw do
   # Managed apps POST uncaught exceptions here (per-app ingest token).
   namespace :api do
     resources :exceptions, only: [ :create ]
+
+    # Git push webhooks. Authenticated by HMAC over the raw body, not by the
+    # token in the path — see Api::WebhooksController.
+    post "webhooks/:token", to: "webhooks#create", as: :webhook
   end
 end

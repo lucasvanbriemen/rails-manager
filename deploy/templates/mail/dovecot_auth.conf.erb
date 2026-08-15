@@ -1,0 +1,83 @@
+# Dovecot starts a listener only for a protocol named here. The `service lmtp`
+# block below is parsed either way, so omitting lmtp produces a config that
+# looks correct and silently never creates /var/spool/postfix/private/dovecot-lmtp
+# — and the moment Postfix is switched to `virtual_transport = lmtp:`, every
+# inbound message bounces.
+#
+# Written out in full, NOT as `protocols = $protocols lmtp`: Dovecot 2.4 does
+# not expand that, it takes the literal string and refuses to start.
+protocols = imap pop3 lmtp sieve
+
+<%= generated_header("Dovecot auth — replaces the Plesk-only passdb and the Plesk-owned userdb.") -%>
+#
+# This fragment is the actual escape hatch. The running config has:
+#
+#   passdb plesk { }
+#   userdb sql  { query = SELECT ... FROM mailbox_quota ... }
+#   sqlite_path = /var/lib/plesk/mail/userdb/userdb.db
+#
+# `passdb plesk` is a driver shipped by Plesk. It is not a Dovecot driver, it is
+# a plugin binary that disappears with the package — and when it does, Dovecot
+# fails EVERY authentication, for every mailbox, with no fallback. The userdb is
+# no better: it reads a SQLite file under /var/lib/plesk.
+#
+# Both are replaced by one passwd-file that this manager owns and renders.
+#
+# Targets Dovecot 2.4 syntax (the box runs 2.4.4). Include from dovecot.conf
+# AFTER removing the two blocks above; two passdbs would mean the Plesk one is
+# still consulted first.
+
+# CRAM-MD5, DIGEST-MD5 and APOP are gone, and their absence is the point. Those
+# mechanisms require the server to hold something plaintext-equivalent, which is
+# precisely why Plesk stored all nine passwords recoverably. A SHA512-CRYPT
+# digest cannot satisfy them, so offering them would mean keeping the plaintext.
+auth_mechanisms = plain login
+
+# Only over TLS. The submission/imaps/pop3s listeners all terminate TLS, so this
+# costs nothing and closes the plaintext-over-port-143 path the old
+# `auth_allow_cleartext = yes` left open.
+auth_allow_cleartext = no
+auth_allow_weak_schemes = no
+
+# Everything after "@" is significant: these are virtual users, and truncating
+# at the domain would merge contact@lucasvanbriemen.nl with
+# contact@voordezorgmanagement.nl into one account.
+auth_username_format = %{user | lower}
+
+passdb passwd-file {
+  passwd_file_path = <%= path_for("dovecot_passwd") %>
+}
+
+# Same file as the passdb: it carries uid, gid, home and quota per line, so
+# there is nothing left for a separate userdb to look up.
+userdb passwd-file {
+  passwd_file_path = <%= path_for("dovecot_passwd") %>
+}
+
+# The existing layout, unchanged. 143 MB of real mail lives here and the whole
+# replatform is a no-op on disk.
+mail_driver = maildir
+mail_path = <%= MailConfig::MAILDIR_ROOT %>/%{user | domain | lower}/%{user | username | lower}/Maildir
+
+service auth {
+  # Postfix authenticates its submission clients through this socket. It is what
+  # replaces plesk_saslauthd — see the main.cf fragment. Without it,
+  # smtpd_sasl_auth_enable is on with nothing behind it and every authenticated
+  # send is rejected.
+  unix_listener /var/spool/postfix/private/auth {
+    mode = 0660
+    user = postfix
+    group = postfix
+  }
+}
+
+service lmtp {
+  # Postfix's virtual_transport delivers here. Dovecot writes the Maildir, which
+  # is what keeps Sieve working — Postfix's own `virtual` delivery agent cannot
+  # run Sieve, and this server has active Sieve scripts.
+  unix_listener /var/spool/postfix/private/dovecot-lmtp {
+    mode = 0600
+    user = postfix
+    group = postfix
+  }
+}

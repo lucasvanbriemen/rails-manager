@@ -1,0 +1,2794 @@
+#!/usr/bin/ruby
+#
+# ltvb-agentd — the root privilege boundary for the apps.ltvb.nl manager.
+#
+# Replaces sudo + /usr/local/sbin/ltvb-deployer. That was 137 lines of bash with
+# 7 verbs; replacing Plesk needs roughly 45 (nginx, systemd units, php-fpm pools,
+# certbot, postfix/dovecot maps, mailboxes, users). Bash at that size is a root
+# shell with extra steps: one unquoted expansion, one `$(...)` in a value that
+# came from a web form, and the boundary is gone. So the boundary is a daemon
+# with a declarative schema instead of a script with hand-written `[[ ]]` guards.
+#
+# The five properties everything else here serves:
+#
+#   1. The caller is identified by SO_PEERCRED, not by filesystem permissions.
+#      Six internet-facing apps share the `ltvb` uid, so socket group membership
+#      proves almost nothing — any of those apps could open the socket. The
+#      manager gets its own uid and only that uid is accepted.
+#   2. Every verb declares its parameters. Unknown keys are a hard error: a typo
+#      or a smuggled extra field must never be silently dropped, because "the
+#      agent ignored it" is how a caller and a callee come to disagree about
+#      what a request meant.
+#   3. No path is ever a parameter. The client names an `fqdn`; the agent looks
+#      the parent webspace up in ITS OWN table and builds the path. There is no
+#      `..` check anywhere in this file because there is nothing to check —
+#      a traversal would have to come from the table, which the web user cannot
+#      write.
+#   4. No config text comes from the web app. A verb takes a RENDER SPEC — a
+#      kind from a closed enum, a suffix, some booleans — and the agent renders.
+#      Templates are named by the handler, never by the request; each one is
+#      compiled in here and may be overridden by a root-owned file under
+#      /etc/ltvb/agent/templates. Rendering from the manager's checkout would
+#      hand the web user a root-parsed file, which is exactly what it does when
+#      the checkout is owned by a uid eight internet-facing apps share.
+#   5. Writes are staged, validated, renamed, and reloaded — never restarted, and
+#      never left broken: a failed reload restores the previous file and reloads
+#      again.
+#
+# This file is deliberately stdlib-only and single-file: root installs it with
+# `install`, and it is NEVER updated by an app deploy. The manager can rewrite
+# its own checkout; if the checkout could rewrite the agent, the agent would be
+# ornamental.
+#
+# Install (as root) — see deploy/agent/README.md for the full recipe.
+
+require "digest"
+require "erb"
+require "etc"
+require "fileutils"
+require "ipaddr"
+require "json"
+require "net/http"
+require "openssl"
+require "socket"
+require "time"
+require "uri"
+
+module LtvbAgent
+  # Bumped by hand when the wire contract changes in a way a client must notice:
+  # a verb removed, a parameter's meaning changed, a response field dropped.
+  # Adding a verb or an optional parameter does not bump it — the client checks
+  # the verb list for what it needs.
+  PROTOCOL = 1
+  VERSION  = "1.0.0".freeze
+
+  SOCKET_PATH = "/run/ltvb-agent.sock".freeze
+  LOCK_PATH   = "/run/ltvb-agent/lock".freeze
+  AUDIT_PATH  = "/var/log/ltvb-agent/audit.log".freeze
+  CONFIG_DIR  = "/etc/ltvb/agent".freeze
+
+  VHOSTS_ROOT   = "/var/www/vhosts".freeze
+  LETSENCRYPT   = "/etc/letsencrypt/live".freeze
+  PLESK_SYSTEM  = "/var/www/vhosts/system".freeze
+
+  # --- the post-Plesk tree ----------------------------------------------------
+  # Every one of these is a compiled-in constant rather than a config value, for
+  # the same reason no path is ever a parameter: these are the directories root
+  # writes into, and the set of them is a property of the machine's design, not
+  # something a caller — or a config file the caller could one day influence —
+  # gets to move.
+
+  # nginx 1.30.4, rescued from the Plesk packaging before it was removed, with
+  # its own tree so nothing here depends on /etc/nginx surviving the uninstall.
+  NGINX_BIN     = "/usr/local/sbin/ltvb-nginx".freeze
+  NGINX_CONF    = "/etc/ltvb/nginx/nginx.conf".freeze
+  NGINX_SITES   = "/etc/ltvb/nginx/sites".freeze
+  NGINX_UNIT    = "ltvb-nginx.service".freeze
+
+  SYSTEMD_DIR   = "/etc/systemd/system".freeze
+  # RuntimeDirectory=ltvb-app/<fqdn> in the app unit creates this; the vhost
+  # proxies into it. Both sides derive the socket from the fqdn so they cannot
+  # drift into a 502 with no log line explaining it.
+  APP_RUN_ROOT  = "/run/ltvb-app".freeze
+  APP_SOCKET    = "puma.sock".freeze
+
+  # 2750 root:ltvb-log, one directory per site. nginx refuses to START when a
+  # directory named in access_log/error_log is missing, so dir.ensure has to run
+  # before the first site file is written — not after.
+  SITE_LOG_ROOT = "/var/log/ltvb/sites".freeze
+  SITE_LOG_GROUP = "ltvb-log".freeze
+  # Primary group of all six webspace owners (gid 1003) — what a unit runs as.
+  SITE_GROUP    = "psacln".freeze
+  # The group the web server is in (gid 1002). Only it may open an fpm socket.
+  WEB_GROUP     = "psaserv".freeze
+
+  # Apache's XSendFile took a filesystem path in the response header; nginx's
+  # X-Accel-Redirect takes a URI, and this is the URI namespace an app sends
+  # paths under. The template renders it as an `internal` location, so the
+  # outside world cannot request the prefix directly.
+  XACCEL_LOCATION = "/_x-accel/".freeze
+
+  # The system-wide rbenv that replaces the six per-webspace .rbenv trees the
+  # Plesk Ruby extension created.
+  RBENV_ROOT    = "/opt/rbenv".freeze
+
+  # Debian's php-fpm layout: /etc/php/<version>/fpm/pool.d/<fqdn>.conf, one
+  # master unit per version. The pools themselves are already per-domain.
+  PHP_ROOT      = "/etc/php".freeze
+  PHP_VERSIONS  = %w[8.2 8.3 8.4].freeze
+
+  # One shared webroot for http-01, so renewal never depends on an individual
+  # site's document root existing or being readable.
+  ACME_WEBROOT  = "/var/www/vhosts/default/htdocs".freeze
+
+  # 182.5 days — the value lucasvanbriemen.nl already sends. Lowering it would
+  # not take effect for anyone who has already pinned the longer one.
+  HSTS_MAX_AGE  = 15_768_000
+  # nginx's 1m default silently 413s music.ltvb.nl's uploads, which Apache
+  # accepted. FPM and Rails both enforce their own limits behind this.
+  CLIENT_MAX_BODY = "512m".freeze
+
+  LIVE_PORTS    = { http: 80,   https: 443  }.freeze
+  STAGING_PORTS = { http: 9080, https: 9443 }.freeze
+
+  # One request line is capped well below anything a legitimate verb sends. The
+  # cap exists so a hostile or wedged client cannot make the agent buffer until
+  # the box OOMs; a real config blob is a few KB.
+  MAX_LINE_BYTES = 1024 * 1024
+
+  # Raised for anything the caller did wrong. `code` is machine-readable so the
+  # manager can distinguish "you sent nonsense" from "the server is busy".
+  class Invalid < StandardError
+    attr_reader :code
+
+    def initialize(message, code = "schema")
+      super(message)
+      @code = code
+    end
+  end
+
+  # Raised when the agent itself could not complete the work (exec failure,
+  # timeout, a rollback that did not take). Never the caller's fault.
+  class Failure < StandardError
+    attr_reader :code
+
+    def initialize(message, code = "internal")
+      super(message)
+      @code = code
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Types — the whole trust boundary, in one place, with no side effects.
+  #
+  # Every one of these is a pure predicate so the adversarial test suite can hit
+  # them directly, without root and without a socket. If a type is wrong, the
+  # daemon is wrong, and a test that needs a unix socket to prove it is a test
+  # nobody runs.
+  # ---------------------------------------------------------------------------
+  module Types
+    # Anchored with \A..\z, never ^..$. With ^..$ the string "git.ltvb.nl\nrm -rf /"
+    # matches a "safe hostname" pattern, because ^ and $ match around the newline.
+    # That single character is the difference between a hostname and a command.
+    HOSTNAME = /\A(?=.{1,253}\z)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\z/
+    LABEL    = /\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/
+    VERSION  = /\A[0-9]{1,4}(?:\.[0-9]{1,4}){0,3}\z/
+
+    # A document-root suffix such as "public" or "httpdocs/public". Dots are not
+    # merely filtered here — they are not in the alphabet at all, so ".." cannot
+    # be spelled. At most two segments, because every real value on this server
+    # is one or two and an unbounded depth is an unbounded surface. Each segment
+    # must START alphanumeric, or "--version" is a legal suffix and every
+    # command that ever receives one reads it as a flag.
+    RELPATH = %r{\A[a-z0-9][a-z0-9_-]{0,63}(?:/[a-z0-9][a-z0-9_-]{0,63})?\z}
+
+    # A request path for http.check. No spaces (would split a request line), no
+    # control characters, and no fragment.
+    URL_PATH = %r{\A/[A-Za-z0-9\-._~!$&'()*+,;=:@%/?]{0,1024}\z}
+
+    # C0 and C1 controls except tab and newline. Rejected everywhere, in addition
+    # to the per-type regexes, so a new type added later cannot forget: NUL
+    # truncates in every C library the agent shells out to, CR forges a second
+    # line in any line-oriented config, and ESC drives the operator's terminal
+    # when they read the audit log.
+    STRICT_CONTROLS = /[\x00-\x1F\x7F-\u009F]/
+    TEXT_CONTROLS   = /[\x00-\x08\x0B-\x1F\x7F-\u009F]/
+
+    # A systemd MemoryMax= / a php memory_limit. Bounded digits, so "999\u20269" is
+    # not a way to spend the parser's time either.
+    SIZE = /\A(?:\d{1,6}[KMG]?|infinity)\z/
+
+    # An IPv4/IPv6 literal or CIDR block, and nothing that could be a hostname.
+    IP_CIDR = %r{\A[0-9A-Fa-f.:]{2,45}(?:/[0-9]{1,3})?\z}
+
+    ENV_KEY  = /\A[A-Za-z_][A-Za-z0-9_]{0,127}\z/
+    ABSOLUTE = %r{\A/[A-Za-z0-9._+@:/-]*\z}
+
+    MAX_SCALAR_BYTES = 4096
+    MAX_TEXT_BYTES   = 64 * 1024
+    MAX_LIST         = 32
+    MAX_ARGV         = 32
+    MAX_ENV_KEYS     = 64
+
+    module_function
+
+    # Common gate for every string parameter, whatever its type.
+    def scalar!(name, value, max: MAX_SCALAR_BYTES, newlines: false)
+      raise Invalid, "#{name}: expected a string, got #{value.class}" unless value.is_a?(String)
+      # JSON hands us UTF-8, but "\ud800" (a lone surrogate) parses into bytes
+      # that are not valid UTF-8. Anything downstream that regex-matches or
+      # shells out on those bytes behaves unpredictably, so reject at the door.
+      raise Invalid, "#{name}: not valid UTF-8" unless value.encoding == Encoding::UTF_8 && value.valid_encoding?
+      raise Invalid, "#{name}: exceeds #{max} bytes" if value.bytesize > max
+
+      pattern = newlines ? TEXT_CONTROLS : STRICT_CONTROLS
+      raise Invalid, "#{name}: contains control characters" if pattern.match?(value)
+
+      value
+    end
+
+    def hostname!(name, value)
+      scalar!(name, value)
+      raise Invalid, "#{name}: not a hostname" unless HOSTNAME.match?(value)
+
+      value
+    end
+
+    def label!(name, value)
+      scalar!(name, value)
+      raise Invalid, "#{name}: not a DNS label" unless LABEL.match?(value)
+
+      value
+    end
+
+    def version!(name, value)
+      scalar!(name, value)
+      raise Invalid, "#{name}: not a version" unless VERSION.match?(value)
+
+      value
+    end
+
+    def relpath!(name, value)
+      scalar!(name, value)
+      raise Invalid, "#{name}: not a document-root suffix" unless value.empty? || RELPATH.match?(value)
+
+      value
+    end
+
+    def url_path!(name, value)
+      scalar!(name, value)
+      raise Invalid, "#{name}: not a request path" unless URL_PATH.match?(value)
+
+      value
+    end
+
+    # A path that gets rendered into a config directive rather than sent in a
+    # request. URL_PATH is the right shape for http.check, where the value ends
+    # up in a request line, but far too permissive for something interpolated
+    # into `location <%= cable_path %> {` — it allows ';', '{', '$', '~' and
+    # '..', which are directive terminators, variables, a regex-location marker
+    # and traversal respectively. nginx -t would catch most of it and
+    # AtomicWrite would roll back, but "the config fails to parse" is a poor
+    # last line of defence for a value the web tier chose. Matches the
+    # manager-side App validation, so the two cannot drift apart silently.
+    CONFIG_PATH = %r{\A/[A-Za-z0-9._~/-]{0,255}\z}
+
+    def config_path!(name, value)
+      scalar!(name, value)
+      ok = CONFIG_PATH.match?(value) && !value.include?("..")
+      raise Invalid, "#{name}: not a plain config path" unless ok
+
+      value
+    end
+
+    # Free text (a rendered .env, a key). Newlines and tabs are the point; every
+    # other control is still refused.
+    def text!(name, value)
+      scalar!(name, value, max: MAX_TEXT_BYTES, newlines: true)
+    end
+
+    def bool!(name, value)
+      raise Invalid, "#{name}: expected true or false" unless value == true || value == false
+
+      value
+    end
+
+    def port!(name, value)
+      # true is an Integer in neither Ruby nor JSON, but 1.0 is a Float that ==
+      # 1, and "80" is a String that looks like a port. Neither is accepted:
+      # a caller that cannot send an integer has a bug worth surfacing.
+      raise Invalid, "#{name}: expected an integer" unless value.is_a?(Integer)
+      raise Invalid, "#{name}: not a port" unless value.between?(1, 65_535)
+
+      value
+    end
+
+    # A closed set declared by the verb. This is how a render spec stays a spec
+    # rather than becoming config text: the client picks "rails" from a list the
+    # agent wrote, and the agent decides what that means.
+    def enum!(name, value, values)
+      scalar!(name, value)
+      raise Invalid, "#{name}: must be one of #{values.join(', ')}" unless values.include?(value)
+
+      value
+    end
+
+    def count!(name, value, min:, max:)
+      raise Invalid, "#{name}: expected an integer" unless value.is_a?(Integer)
+      raise Invalid, "#{name}: must be between #{min} and #{max}" unless value.between?(min, max)
+
+      value
+    end
+
+    def size!(name, value)
+      scalar!(name, value)
+      raise Invalid, "#{name}: not a size (e.g. 512M, 1G, infinity)" unless SIZE.match?(value)
+
+      value
+    end
+
+    # allow/deny take a literal address or CIDR. A hostname would make nginx
+    # resolve at load time and then silently permit whatever that name points at
+    # afterwards, so only literals are accepted. IPAddr is asked last: it is
+    # liberal about forms this server never uses ("10", "0x7f000001"), and the
+    # regex is what pins the shape down.
+    def ip!(name, value)
+      scalar!(name, value, max: 64)
+      raise Invalid, "#{name}: #{value.inspect} is not an address or CIDR" unless IP_CIDR.match?(value)
+
+      begin
+        IPAddr.new(value)
+      rescue StandardError
+        raise Invalid, "#{name}: #{value.inspect} is not an address or CIDR"
+      end
+
+      value
+    end
+
+    def ip_list!(name, value)
+      list!(name, value, MAX_LIST)
+      value.each_with_index { |entry, i| ip!("#{name}[#{i}]", entry) }
+      value
+    end
+
+    # An argv array, never a command string: with no shell anywhere in Exec,
+    # there is nothing for a `;` or a backtick in an element to escape into. The
+    # one exception is systemd's own separator, which is compared after quotes
+    # are stripped and would silently append a second ExecStart command line.
+    def argv!(name, value)
+      list!(name, value, MAX_ARGV)
+      raise Invalid, "#{name}: is empty" if value.empty?
+
+      value.each_with_index do |arg, i|
+        scalar!("#{name}[#{i}]", arg)
+        raise Invalid, "#{name}[#{i}]: is blank" if arg.empty?
+        raise Invalid, "#{name}[#{i}]: is a bare command separator" if arg == ";"
+      end
+      unless ABSOLUTE.match?(value.first)
+        raise Invalid, "#{name}[0]: must be an absolute path, got #{value.first.inspect}"
+      end
+
+      value
+    end
+
+    # Environment pairs for a unit file. Newlines are refused rather than
+    # escaped: systemd parses a unit line by line, so a value of
+    # "x\nExecStartPre=/bin/sh -c curl…" does not corrupt a value — it adds a
+    # command root runs. There is no quoting that makes that safe.
+    def env!(name, value)
+      raise Invalid, "#{name}: expected an object" unless value.is_a?(Hash)
+      raise Invalid, "#{name}: more than #{MAX_ENV_KEYS} keys" if value.size > MAX_ENV_KEYS
+
+      total = 0
+      value.each do |key, item|
+        raise Invalid, "#{name}: key #{key.inspect} is not an environment variable name" unless key.is_a?(String) && ENV_KEY.match?(key)
+
+        scalar!("#{name}[#{key}]", item)
+        total += key.bytesize + item.bytesize
+      end
+      raise Invalid, "#{name}: exceeds #{MAX_TEXT_BYTES} bytes in total" if total > MAX_TEXT_BYTES
+
+      value
+    end
+
+    # One line of free text (a unit Description=). No newlines, so it cannot
+    # grow a second directive; length-capped so it cannot grow a unit file.
+    def line!(name, value)
+      scalar!(name, value, max: 200)
+    end
+
+    def list!(name, value, max)
+      raise Invalid, "#{name}: expected an array" unless value.is_a?(Array)
+      raise Invalid, "#{name}: more than #{max} entries" if value.size > max
+
+      value
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Units — which systemd units this agent will read, and the much smaller set
+  # it will act on.
+  #
+  # Two tiers on purpose. `readable!` is wide because status and journal output
+  # are diagnostics and a wrong guess there costs nothing. `controllable!` is a
+  # short list of shapes, because start/stop/enable/restart on an arbitrary unit
+  # would let a compromised manager stop sshd or the firewall — not privilege
+  # escalation, but an outage it could not be talked out of.
+  # ---------------------------------------------------------------------------
+  module Units
+    # <name>[@<instance>].<type>. Anchored, lowercase, and no slash anywhere, so
+    # a unit name can never be read as a path by systemctl.
+    NAME = /\A[a-z0-9][a-z0-9_-]{0,200}(?:@[a-z0-9][a-z0-9.-]{0,126})?\.(?:service|timer|socket)\z/
+
+    # Real units on this box whose names predate the pattern: Debian's php-fpm
+    # masters put the version (with a dot) in the unit name, and postfix's
+    # default instance is literally "-". Deliberately an enumeration and not a
+    # looser regex — a legacy exception that can match names nobody has seen is
+    # not an exception, it is the new rule.
+    LEGACY = %w[
+      php8.2-fpm.service php8.3-fpm.service php8.4-fpm.service postfix@-.service
+    ].freeze
+
+    # Everything the manager installs, plus the two git.ltvb.nl workers it
+    # inherited and the php-fpm masters a pool write has to reload.
+    CONTROLLABLE = [
+      /\Altvb-app@[a-z0-9][a-z0-9.-]{0,126}\.service\z/,
+      /\Altvb-[a-z0-9][a-z0-9_-]{0,200}\.service\z/,
+      /\Agit-ltvb-[a-z0-9-]{1,32}\.service\z/,
+      /\Aphp8\.[0-9]-fpm\.service\z/
+    ].freeze
+
+    # The agent must not be asked to stop the agent: the call that did it would
+    # be the last one answered, and nothing left running could start it again.
+    NEVER = %w[ltvb-agent.service].freeze
+
+    # Units the manager may only OBSERVE (status/journal). Everything it can
+    # control, plus the shared daemons whose health it legitimately reports on.
+    #
+    # Reading is not harmless, so this is an allowlist rather than "any unit
+    # that isn't controllable":
+    #   * ltvb-agent.service is the privilege boundary — its journal carries the
+    #     audit trail of every call made through it, including failures that
+    #     quote the parameters that caused them.
+    #   * sshd.service logs usernames and source addresses for every login and
+    #     every failed attempt, which is a credential-adjacent feed the web tier
+    #     has no reason to hold.
+    # Neither appears below, deliberately.
+    OBSERVABLE = [
+      /\Anginx\.service\z/,
+      /\Aapache2\.service\z/,
+      /\Amariadb\.service\z/,
+      /\Adovecot\.service\z/,
+      /\Apostfix@-\.service\z/,
+      /\Aredis-server\.service\z/,
+      /\Asupervisor\.service\z/
+    ].freeze
+
+    module_function
+
+    def name!(field, value)
+      Types.scalar!(field, value, max: 255)
+      ok = (NAME.match?(value) || LEGACY.include?(value)) && !value.include?("..") &&
+           !value.include?("/") && !value.end_with?(".")
+      raise Invalid, "#{field}: #{value.inspect} is not a unit name this agent recognises" unless ok
+
+      value
+    end
+
+    def controllable!(field, value)
+      name!(field, value)
+      raise Invalid.new("#{field}: #{value} is not a unit this agent may control", "not_manageable") unless controllable?(value)
+
+      value
+    end
+
+    # status/journal. Strictly wider than controllable? and strictly narrower
+    # than name! — a well-formed unit name is not on its own a reason to hand
+    # its log to the web tier.
+    def observable!(field, value)
+      name!(field, value)
+      raise Invalid.new("#{field}: #{value} is not a unit this agent may read", "not_readable") unless observable?(value)
+
+      value
+    end
+
+    def controllable?(value)
+      return false if NEVER.include?(value)
+
+      CONTROLLABLE.any? { |pattern| pattern.match?(value) }
+    end
+
+    def observable?(value)
+      return false if NEVER.include?(value)
+
+      controllable?(value) || OBSERVABLE.any? { |pattern| pattern.match?(value) }
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Webspaces — the agent's own map from hostname to directory.
+  #
+  # This is property 3. The client sends "git.ltvb.nl"; this table says that
+  # ltvb.nl is a webspace owned by `ltvb`, so the site lives at
+  # /var/www/vhosts/ltvb.nl/git.ltvb.nl. The client never names a directory, so
+  # there is no traversal to defend against.
+  #
+  # `manageable` preserves the policy the bash wrapper enforced with its
+  # ALLOWED_DOMAINS array: only the two domains we own outright accept mutating
+  # verbs. The four customer webspaces are readable (discovery, health checks)
+  # but not writable, and flipping that is a root edit of webspaces.json — not a
+  # code change and not something the manager can ask for.
+  # ---------------------------------------------------------------------------
+  class Webspaces
+    Site = Struct.new(:fqdn, :domain, :owner, :root, :manageable, :apex, keyword_init: true)
+
+    DEFAULT = {
+      "ltvb.nl"                => { "owner" => "ltvb",                          "manageable" => true },
+      "lucasvanbriemen.nl"     => { "owner" => "lucasvanbriemen.nl_p8c08835y9j", "manageable" => true },
+      "djtim.eu"               => { "owner" => "djtim.eu_aqwzxapl85w",           "manageable" => false },
+      "rijschool-mos.nl"       => { "owner" => "rijschool-mos.nl_gze6m7rrghq",   "manageable" => false },
+      "voordezorgmanagement.nl" => { "owner" => "voordezorgmanagement._rhc4zy0iyc", "manageable" => false },
+      "mos-safeguards.com"     => { "owner" => "mos-safeguards.com_eea0inbcx8t",  "manageable" => false }
+    }.freeze
+
+    def self.load(path = File.join(CONFIG_DIR, "webspaces.json"))
+      new(Config.read_json(path) || DEFAULT)
+    end
+
+    def initialize(table)
+      @table = table.each_with_object({}) do |(domain, attrs), out|
+        # A malformed table is a boot failure, not a runtime surprise: if this
+        # map is wrong every path the agent derives is wrong.
+        raise Failure, "webspaces: #{domain.inspect} is not a hostname" unless Types::HOSTNAME.match?(domain.to_s)
+
+        out[domain.to_s] = {
+          owner:      attrs["owner"].to_s,
+          manageable: attrs["manageable"] == true
+        }
+      end.freeze
+    end
+
+    def domains = @table.keys
+
+    def domain?(name) = @table.key?(name)
+
+    def manageable?(domain) = @table.dig(domain, :manageable) == true
+
+    def owner(domain) = @table.dig(domain, :owner)
+
+    # nil when the hostname belongs to no webspace we run. That is the only way
+    # a path gets built, so an unknown hostname simply has no path.
+    def resolve(fqdn)
+      return nil unless fqdn.is_a?(String) && Types::HOSTNAME.match?(fqdn)
+
+      if (entry = @table[fqdn])
+        # The apex of a webspace serves from httpdocs, not from a directory
+        # named after itself — Plesk's layout, and the migration keeps it.
+        return site(fqdn, fqdn, entry, File.join(VHOSTS_ROOT, fqdn, "httpdocs"), apex: true)
+      end
+
+      parent = @table.keys.find { |d| fqdn.end_with?(".#{d}") }
+      return nil unless parent
+
+      # Exactly one label deep. Every hostname on this server is, and each extra
+      # level is another chance for this table and the on-disk layout to disagree
+      # about which directory a name means.
+      return nil if fqdn.delete_suffix(".#{parent}").include?(".")
+
+      site(fqdn, parent, @table[parent], File.join(VHOSTS_ROOT, parent, fqdn), apex: false)
+    end
+
+    private
+
+    def site(fqdn, domain, entry, root, apex:)
+      Site.new(fqdn: fqdn, domain: domain, owner: entry[:owner], root: root,
+               manageable: entry[:manageable], apex: apex)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Config — root-owned JSON, refused if anyone else can write it.
+  # ---------------------------------------------------------------------------
+  module Config
+    DEFAULT = {
+      # The uid allowed to call. `ltvb` is deliberately NOT here: six public apps
+      # run as that uid, and any of them being compromised must not become root.
+      # The manager gets a dedicated account (see README).
+      "allowed_users" => [ "ltvb-manager" ],
+      "socket_group"  => "ltvb-agent",
+      # services.discover only reports units matching these globs. A full unit
+      # list leaks the shape of the machine to a web app for no benefit.
+      "service_globs" => [
+        "ltvb-*.service", "git-ltvb-*.service", "apache2.service", "nginx.service",
+        "php*-fpm.service", "postfix*.service", "dovecot.service", "certbot*.service"
+      ]
+    }.freeze
+
+    module_function
+
+    def load(path = File.join(CONFIG_DIR, "agent.json"))
+      DEFAULT.merge(read_json(path) || {})
+    end
+
+    # nil when absent — callers fall back to their compiled-in default so a fresh
+    # install boots. Present-but-untrusted is fatal: silently ignoring a config
+    # file an attacker just planted is worse than not booting.
+    def read_json(path, owner: 0)
+      Trusted.file!(path, owner: owner)
+      JSON.parse(File.read(path), max_nesting: 8, create_additions: false)
+    rescue Errno::ENOENT
+      nil
+    rescue JSON::ParserError => e
+      raise Failure, "#{path}: invalid JSON (#{e.message})"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Trusted — "root wrote this and only root can change it".
+  #
+  # Everything the agent reads as an instruction (its config, its templates) goes
+  # through here. lstat, not stat: following a symlink and then asking who owns
+  # the destination answers the wrong question, because the symlink itself is
+  # what an attacker gets to plant.
+  #
+  # `owner` exists so the rules can be exercised by a test suite that is not
+  # root. Production never passes it — 0 is the only value that ships.
+  # ---------------------------------------------------------------------------
+  module Trusted
+    module_function
+
+    def file!(path, owner: 0)
+      stat = File.lstat(path)
+      raise Failure, "#{path}: is a symlink" if stat.symlink?
+      raise Failure, "#{path}: not a regular file" unless stat.file?
+      raise Failure, "#{path}: not owned by uid #{owner}" unless stat.uid == owner
+      raise Failure, "#{path}: writable by group or other" unless (stat.mode & 0o022).zero?
+
+      path
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Templates — property 4.
+  #
+  # Config text is never a parameter. A handler names a template by a constant;
+  # this resolves it under a root-owned directory and refuses anything that is
+  # not a plain root-owned file. The symlink check is the point: /etc/ltvb is
+  # root-only, but a template directory that ever became writable would otherwise
+  # let a symlink turn "render nginx-site" into "render /home/attacker/site".
+  # ---------------------------------------------------------------------------
+  module Templates
+    DIR = File.join(CONFIG_DIR, "templates").freeze
+
+    # No leading dot, and every dot must be followed by an alphanumeric — so
+    # "..", "." and "../x" are unspellable, and there is no separator to abuse.
+    NAME = /\A[a-z0-9]+(?:[-.][a-z0-9]+)*\z/
+
+    # Compiled into the daemon, which root installs, so a box with an empty
+    # /etc/ltvb/agent/templates still serves sites. Same rule as Config: absent
+    # falls back to the built-in, present-and-untrusted is fatal. The built-in
+    # is the SAFER of the two — it cannot be edited without replacing the binary
+    # root installed — so the fallback direction is deliberately this way round
+    # and not "prefer whatever is on disk".
+    DEFAULTS = {
+      # ---- BEGIN GENERATED from deploy/templates/nginx/nginx-site.erb ----
+      # Regenerate with `ruby deploy/agent/embed-nginx-template` after editing
+      # the template. The manager renders the same file for its previews and
+      # its tests, which is what makes a test failure here mean the config
+      # this daemon writes is wrong.
+      "nginx-site" => <<~'ERB',
+        # Generated from nginx-site.erb — do not edit by hand; edit the App and
+        # re-render. Requires the shared http{} config (log format, scrub maps, TLS
+        # session zone) to be included before this file.
+        #
+        # <%= fqdn %> | kind: <%= kind %> | <%= staging ? "staging" : "live" %> (<%= http_port %>/<%= https_port %>)
+        <%
+          # Derived here rather than by the caller. This file is rendered from two
+          # places — the agent, which writes the served config, and the manager, which
+          # previews and tests it — and anything the two compute separately is a thing
+          # they can eventually compute differently. That drift is what this template
+          # exists to make impossible, so it keeps every derivation it can.
+
+          # With tls off there is nowhere to redirect TO, so redirect_http is ignored
+          # rather than obeyed into a loop.
+          redirect = tls && redirect_http
+
+          # Staging has to name its own port or the redirect bounces the browser
+          # straight back to live Apache, which is exactly what staging is testing.
+          https_suffix = staging ? ":#{https_port}" : ""
+
+          listen_arg = lambda do |port, ssl:, ipv6:|
+            parts = [ ipv6 ? "[::]:#{port}" : port.to_s ]
+            parts << "default_server" if default_server
+            parts << "ssl" if ssl
+            parts.join(" ")
+          end
+        -%>
+        <% (tls ? [ false, true ] : [ false ]).each do |https| -%>
+
+        server {
+            listen <%= listen_arg.call(https ? https_port : http_port, ssl: https, ipv6: false) %>;
+            # IPv6 is not implied by the IPv4 listen. mos-safeguards.com served HTTPS on
+            # v4 only for eight months because this line was missing from its vhost, and
+            # every dual-stack client silently got a connection refused.
+            listen <%= listen_arg.call(https ? https_port : http_port, ssl: https, ipv6: true) %>;
+        <% if https -%>
+            http2 on;
+        <% end -%>
+
+            server_name <%= fqdn %>;
+        <% if https -%>
+
+            ssl_certificate     <%= cert_dir %>/fullchain.pem;
+            ssl_certificate_key <%= cert_dir %>/privkey.pem;
+
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+            # The client's preference order is the better one on TLS 1.3 hardware: it
+            # knows whether it has AES acceleration and we do not.
+            ssl_prefer_server_ciphers off;
+
+            # No ssl_stapling. Let's Encrypt retired its OCSP responder, so there is
+            # nothing to staple, and turning it on would make every worker depend on a
+            # resolver being reachable — a dependency that fails closed at reload time.
+        <% end -%>
+
+            # Per-site logs, split out of Plesk's shared /var/www/vhosts/system tree so a
+            # site's logs survive the domain being reconfigured and can be rotated per
+            # app. ltvb_scrubbed drops ?auth_token= before anything is written.
+            access_log <%= log_dir %>/<%= log_prefix %>access.log ltvb_scrubbed;
+            error_log  <%= log_dir %>/<%= log_prefix %>error.log warn;
+
+            # nginx defaults to 1m and returns 413 with nothing in the app's log. Apache
+            # had no limit here, so music.ltvb.nl's uploads would start failing on
+            # cutover.
+            client_max_body_size <%= client_max_body %>;
+        <% if https && hsts -%>
+
+            # `always` or nginx omits it on error responses, which is where a downgrade
+            # would be attempted.
+            add_header Strict-Transport-Security "max-age=<%= hsts_max_age %>; includeSubDomains" always;
+        <% end -%>
+        <% unless allow.empty? -%>
+
+            # IP allowlist. These are server-level, so they are inherited by every
+            # location that does not declare its own allow/deny — which is how the
+            # acme-challenge location below opts back out without needing to be ordered
+            # first.
+        <% allow.each do |entry| -%>
+            allow <%= entry %>;
+        <% end -%>
+            deny all;
+        <% end -%>
+
+            # http-01 renewal has to work on an IP-restricted site and on a site that
+            # redirects everything to https, so it is a location of its own that re-opens
+            # access explicitly (nginx inherits allow/deny only into levels that declare
+            # none of their own). `^~` so it also wins over the dotfile regex below —
+            # the challenge path is literally a dotfile directory.
+            location ^~ /.well-known/acme-challenge/ {
+                allow all;
+                root <%= acme_root %>;
+            }
+        <% if redirect && !https -%>
+
+            location / {
+                return 301 https://$host<%= https_suffix %>$request_uri;
+            }
+        <% else -%>
+
+            root <%= docroot %>;
+
+            # Plesk denied dotfiles only under the challenge directory, but Apache's
+            # stock config denies .ht* everywhere — which the staging stack did not, and
+            # .htaccess came back 200 on mos-safeguards.com and voordezorgmanagement.nl
+            # while Apache answered 403. Generalise it: a .git, .env or .htaccess that
+            # lands in a document root must never be served. First regex location, so it
+            # wins over the PHP handler below; the lookahead keeps /.well-known/
+            # (security.txt, apple-app-site-association) reachable.
+            location ~ /\.(?!well-known/) {
+                deny all;
+            }
+        <% unless xaccel_root.empty? -%>
+
+            # Apache's XSendFile, ported. The difference matters: XSendFile took a real
+            # filesystem path in the response header, X-Accel-Redirect takes a URI. The
+            # app must emit `X-Accel-Redirect: <%= xaccel_location %><relative path>`, NOT the
+            # absolute path it sends today. `internal` means the outside world cannot
+            # request this prefix directly — the app is still the only thing that can
+            # authorise a file.
+            location <%= xaccel_location %> {
+                internal;
+                alias <%= xaccel_root %>/;
+            }
+        <% end -%>
+        <% unless cable_path.empty? -%>
+
+            # Websocket endpoint. Apache forced HTTP/1.1 for the whole vhost to make this
+            # work; nginx does not need that — the proxy leg is always HTTP/1.1
+            # regardless of the client's protocol, and 1.25+ handles websockets over
+            # HTTP/2 itself.
+            location <%= cable_path %> {
+                proxy_pass <%= cable_upstream %>;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade    $http_upgrade;
+                # $ltvb_connection_upgrade, not a literal "upgrade": Connection must say
+                # upgrade only when the client asked for it and close otherwise, or
+                # keepalive breaks for every ordinary request sharing the connection.
+                proxy_set_header Connection $ltvb_connection_upgrade;
+                proxy_set_header Host       $host;
+                proxy_set_header X-Real-IP  $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                # An idle socket is normal here; the 60s default would cull every quiet
+                # tab.
+                proxy_read_timeout 3600s;
+                proxy_send_timeout 3600s;
+                # Buffering a stream defeats the point of the stream.
+                proxy_buffering off;
+            }
+        <% end -%>
+        <% if kind == "rails" -%>
+
+            index index.html;
+
+            # Sprockets/Propshaft names are content-hashed, so a stale answer is
+            # impossible and these never need to reach Puma. `expires` rather than
+            # `add_header Cache-Control`: an add_header in a location replaces the whole
+            # inherited set, which would silently drop the HSTS header on exactly the
+            # requests a browser makes most often.
+            location /assets/ {
+                expires 1y;
+                access_log off;
+                try_files $uri =404;
+            }
+
+            location / {
+                try_files $uri @app;
+            }
+
+            # Puma listens on a unix socket owned by ltvb-app@<%= fqdn %>.service. A socket
+            # rather than a loopback port so the filesystem permissions decide who may
+            # talk to the app, and so two apps can never collide on a port number.
+            location @app {
+                proxy_pass http://unix:<%= app_socket %>:;
+                proxy_http_version 1.1;
+                proxy_set_header Host              $host;
+                proxy_set_header X-Real-IP         $remote_addr;
+                proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+                # Rails' force_ssl and url_for read this. On the :80 block of a site that
+                # legitimately serves plain http, $scheme is "http" and Rails must be
+                # told the truth or it builds https URLs for a request that arrived over
+                # http.
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_set_header X-Forwarded-Host  $host;
+                # Redirects the app emits point at the socket URL otherwise.
+                proxy_redirect off;
+                proxy_read_timeout 120s;
+            }
+        <% elsif kind == "laravel" || kind == "php" -%>
+
+            # index.html BEFORE index.php, matching this server's Apache DirectoryIndex
+            # ("index.html" "index.cgi" "index.pl" "index.php" ...). The staging
+            # comparison caught this: student.rijschool-mos.nl ships both, Apache serves
+            # the .html and nginx served the .php, which redirected to a login page.
+            # Whichever order is "better" in the abstract, a migration that silently
+            # changes which page a site serves is a regression.
+            index index.html index.php;
+
+            location / {
+        <% if kind == "laravel" -%>
+                # Laravel's stock public/.htaccess front controller. nginx does not read
+                # .htaccess at all, so leaving this out gives a working homepage and a
+                # 404 on every other route — which looks like an app bug.
+                try_files $uri $uri/ /index.php?$query_string;
+        <% else -%>
+                # No front controller: a request that names no real file is a 404, not a
+                # rewrite. These sites have no router to hand it to.
+                try_files $uri $uri/ =404;
+        <% end -%>
+            }
+
+            # PHP-FPM. The pool is Plesk's, one per domain, running as the webspace owner
+            # with its own open_basedir — that stays as it is; only the web server in
+            # front of it changes.
+            #
+            # The fastcgi_param list is written out rather than `include fastcgi_params`:
+            # that file belongs to Plesk's sw-nginx package, and this config has to keep
+            # working after that package is removed.
+            location ~ [^/]\.php(/|$) {
+                fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+                # try_files resets $fastcgi_path_info, so stash it first. Documented
+                # nginx behaviour, and the reason PATH_INFO silently goes empty in most
+                # copied configs.
+                set $ltvb_path_info $fastcgi_path_info;
+                # The whole point of this line: without it, /uploads/photo.jpg/x.php
+                # hands FPM a SCRIPT_FILENAME that resolves to the uploaded image and
+                # executes it.
+                try_files $fastcgi_script_name =404;
+
+                fastcgi_pass unix:<%= fpm_socket %>;
+
+                fastcgi_param SCRIPT_FILENAME   $document_root$fastcgi_script_name;
+                fastcgi_param SCRIPT_NAME       $fastcgi_script_name;
+                fastcgi_param PATH_INFO         $ltvb_path_info;
+                fastcgi_param PATH_TRANSLATED   $document_root$ltvb_path_info;
+                fastcgi_param DOCUMENT_ROOT     $document_root;
+                fastcgi_param DOCUMENT_URI      $document_uri;
+                fastcgi_param REQUEST_URI       $request_uri;
+                fastcgi_param REQUEST_METHOD    $request_method;
+                fastcgi_param QUERY_STRING      $query_string;
+                fastcgi_param CONTENT_TYPE      $content_type;
+                fastcgi_param CONTENT_LENGTH    $content_length;
+                fastcgi_param SERVER_PROTOCOL   $server_protocol;
+                fastcgi_param SERVER_NAME       $server_name;
+                fastcgi_param SERVER_ADDR       $server_addr;
+                fastcgi_param SERVER_PORT       $server_port;
+                fastcgi_param SERVER_SOFTWARE   nginx;
+                fastcgi_param GATEWAY_INTERFACE CGI/1.1;
+                fastcgi_param REMOTE_ADDR       $remote_addr;
+                fastcgi_param REMOTE_PORT       $remote_port;
+                fastcgi_param REQUEST_SCHEME    $scheme;
+                # if_not_empty: PHP treats HTTPS as on whenever the variable exists at
+                # all, so passing an empty string would make every plain-http request
+                # look secure.
+                fastcgi_param HTTPS             $https if_not_empty;
+                # Without this, a pool built with security.limit_extensions refuses to
+                # run.
+                fastcgi_param REDIRECT_STATUS   200;
+                # httpoxy. A request carrying a Proxy header becomes HTTP_PROXY in the
+                # CGI environment, which several HTTP client libraries then obey. Plesk's
+                # fastcgi_params blanked it; this list has to as well.
+                fastcgi_param HTTP_PROXY        "";
+
+                fastcgi_hide_header X-Powered-By;
+                # Laravel sessions and long Set-Cookie headers overflow the 4k default
+                # and surface as an upstream-sent-too-big-header 502.
+                fastcgi_buffer_size 32k;
+                fastcgi_buffers 16 16k;
+                fastcgi_read_timeout 300s;
+            }
+        <% elsif kind == "static" -%>
+
+            index index.html index.htm;
+
+            location / {
+                try_files $uri $uri/ =404;
+            }
+
+            # Without a PHP handler nginx would serve a .php file as plain text — turning
+            # a stray script from "not executed" into "source code published". 404
+            # instead.
+            location ~ [^/]\.php(/|$) {
+                return 404;
+            }
+        <% end -%>
+        <% end -%>
+        }
+        <% end -%>
+      ERB
+      # ---- END GENERATED ----
+
+      # The per-app Puma. Every value here is escaped by the handler before it
+      # arrives; the template interpolates and does not decide anything.
+      "systemd-app" => <<~'ERB',
+        # Generated by ltvb-agentd — do not edit by hand.
+        # Install mode is 0600: this file carries RAILS_MASTER_KEY and six
+        # unrelated webspace users share this box. That is necessary but not
+        # sufficient — systemd republishes Environment= over D-Bus, so
+        # `systemctl show -p Environment` reveals it to any local user. Moving
+        # these to LoadCredential= is the real fix.
+        [Unit]
+        Description=<%= description %>
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        User=<%= user %>
+        Group=<%= group %>
+        WorkingDirectory=<%= working_directory %>
+        # 0750, one directory per app, so a compromised app cannot reach another
+        # app's socket. nginx has to traverse it and is a member of the group.
+        RuntimeDirectory=<%= runtime_directory %>
+        RuntimeDirectoryMode=0750
+        <% environment.each do |line| -%>
+        Environment=<%= line %>
+        <% end -%>
+        ExecStart=<%= exec_start %>
+        ExecReload=/bin/kill -USR2 $MAINPID
+        Restart=always
+        RestartSec=3
+        # A leaking app gets OOM-killed and restarted instead of taking the
+        # other twenty-one hostnames down with it.
+        MemoryMax=<%= memory_max %>
+        NoNewPrivileges=yes
+        PrivateTmp=yes
+        ProtectSystem=full
+
+        [Install]
+        WantedBy=multi-user.target
+      ERB
+
+      "systemd-worker" => <<~'ERB',
+        # Generated by ltvb-agentd — do not edit by hand.
+        [Unit]
+        Description=<%= description %>
+        After=network-online.target
+        Wants=network-online.target
+
+        [Service]
+        Type=simple
+        User=<%= user %>
+        Group=<%= group %>
+        WorkingDirectory=<%= working_directory %>
+        <% environment.each do |line| -%>
+        Environment=<%= line %>
+        <% end -%>
+        ExecStart=<%= exec_start %>
+        Restart=always
+        RestartSec=5
+        MemoryMax=<%= memory_max %>
+        NoNewPrivileges=yes
+        PrivateTmp=yes
+        ProtectSystem=full
+
+        [Install]
+        WantedBy=multi-user.target
+      ERB
+
+      "fpm-pool" => <<~'ERB'
+        ; Generated by ltvb-agentd — do not edit by hand.
+        [<%= fqdn %>]
+        user = <%= user %>
+        group = <%= group %>
+
+        ; The socket keeps Plesk's location so nothing has to move in the same
+        ; step the web server does. 0660 root:<%= socket_group %>, because nginx
+        ; connects to it and nobody else may.
+        listen = <%= socket %>
+        listen.owner = root
+        listen.group = <%= socket_group %>
+        listen.mode = 0660
+
+        pm = ondemand
+        pm.max_children = <%= max_children %>
+        pm.process_idle_timeout = 60s
+        pm.max_requests = 500
+
+        catch_workers_output = yes
+        php_admin_value[error_log] = <%= error_log %>
+        php_admin_flag[log_errors] = on
+        php_admin_value[memory_limit] = <%= memory_limit %>
+      ERB
+    }.freeze
+
+    module_function
+
+    # A template name is a constant in a handler, never a request parameter —
+    # but it is validated anyway, because "no caller passes this yet" is a
+    # property of today's verb list and not of this function.
+    def path(name, dir: DIR, owner: 0)
+      name!(name)
+
+      Trusted.file!(File.join(dir, "#{name}.erb"), owner: owner)
+    rescue Errno::ENOENT
+      raise Invalid, "template: #{name} not installed"
+    end
+
+    def name!(name)
+      raise Invalid, "template: bad name #{name.inspect}" unless name.is_a?(String) && NAME.match?(name)
+
+      name
+    end
+
+    # An installed override wins, but only if it passes the trust check; absent
+    # falls back to the built-in. An override that exists and is a symlink, or
+    # is owned by anyone but root, or is group-writable, raises — silently
+    # ignoring a template an attacker just planted is the one behaviour that
+    # would make this whole module decorative.
+    def source(name, dir: DIR, owner: 0)
+      name!(name)
+      installed = begin
+        path(name, dir: dir, owner: owner)
+        # "not installed" is the one case the built-in answers. A symlink or a
+        # wrong owner comes back from Trusted as Failure and is deliberately NOT
+        # caught here: silently rendering the built-in because someone planted a
+        # template would make this whole module decorative.
+      rescue Invalid
+        return DEFAULTS[name] || raise(Invalid, "template: #{name} is neither installed nor built in")
+      end
+
+      File.read(installed)
+    end
+
+    # result_with_hash rather than a binding: the template gets exactly the
+    # variables the handler passed and no access to the agent's own state.
+    def render(name, vars, dir: DIR, owner: 0)
+      ERB.new(source(name, dir: dir, owner: owner), trim_mode: "-").result_with_hash(vars)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Exec — child processes with a deadline and no shell, ever.
+  # ---------------------------------------------------------------------------
+  module Exec
+    MAX_OUTPUT = 256 * 1024
+    TERM_GRACE = 5
+
+    # Children get nothing from the agent's environment. LANG is pinned so
+    # parsers here see the C locale's output rather than a translated one.
+    CHILD_ENV = { "PATH" => "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                  "LANG" => "C.UTF-8", "LC_ALL" => "C.UTF-8" }.freeze
+
+    Result = Struct.new(:ok, :out, :err, :timed_out)
+
+    module_function
+
+    def run(argv, timeout:)
+      argv = Array(argv).map(&:to_s)
+      # An absolute argv[0] means PATH cannot be steered into a hostile binary,
+      # and it makes every command in this file greppable.
+      raise Failure, "exec: argv[0] must be absolute (#{argv.first.inspect})" unless argv.first.to_s.start_with?("/")
+
+      out_r, out_w = IO.pipe
+      err_r, err_w = IO.pipe
+      # [path, argv0] is the never-a-shell spawn form. Passing a bare string —
+      # or a single-element array — can hand the command to /bin/sh, which is
+      # precisely the failure mode this daemon exists to remove.
+      pid = Process.spawn(CHILD_ENV, [ argv.first, argv.first ], *argv[1..],
+                          in: :close, out: out_w, err: err_w,
+                          pgroup: true, unsetenv_others: true, close_others: true)
+      out_w.close
+      err_w.close
+
+      collect(pid, out_r, err_r, timeout)
+      # A binary that is missing or not executable is an install problem, not a
+      # crash: it must come back to the caller as a normal failed call so the
+      # audit log records it and the connection survives.
+    rescue Errno::ENOENT, Errno::EACCES => e
+      raise Failure.new("#{argv.first}: #{e.message}", "exec")
+    ensure
+      [ out_w, err_w, out_r, err_r ].each { |io| io&.close unless io&.closed? }
+    end
+
+    def collect(pid, out_r, err_r, timeout)
+      deadline = now + timeout
+      buffers  = { out_r => +"", err_r => +"" }
+      open     = [ out_r, err_r ]
+      timed_out = false
+
+      until open.empty?
+        remaining = deadline - now
+        if remaining <= 0
+          timed_out = true
+          break
+        end
+
+        ready = IO.select(open, nil, nil, [ remaining, 0.25 ].min)
+        next unless ready
+
+        ready.first.each do |io|
+          chunk = begin
+            io.read_nonblock(64 * 1024)
+          rescue IO::WaitReadable
+            next
+          rescue EOFError
+            open.delete(io)
+            next
+          end
+          # Truncate rather than grow without bound: a runaway child's stdout is
+          # not worth the agent's address space, and 256 KB is far more than any
+          # verb here legitimately produces.
+          buffers[io] << chunk if buffers[io].bytesize < MAX_OUTPUT
+        end
+      end
+
+      # Both pipes closing is not the same as the child exiting: a process that
+      # closes its own stdout and then hangs would otherwise park the agent in a
+      # blocking waitpid forever, past the deadline it was given.
+      status = timed_out ? nil : reap_before(pid, deadline)
+      timed_out ||= status.nil?
+      status = kill_tree(pid) if timed_out
+
+      Result.new(!timed_out && status&.success?, finish(buffers[out_r]), finish(buffers[err_r]), timed_out)
+    end
+
+    # nil when the deadline passed with the child still alive.
+    def reap_before(pid, deadline)
+      loop do
+        _, status = Process.waitpid2(pid, Process::WNOHANG)
+        return status if status
+        return nil if now >= deadline
+
+        sleep 0.05
+      end
+    rescue Errno::ECHILD
+      nil
+    end
+
+    # The child was spawned into its own process group, so the whole tree dies —
+    # a `plesk` invocation that forks helpers would otherwise leave them running
+    # with the pipe still open after the agent gave up.
+    def kill_tree(pid)
+      Process.kill("TERM", -pid)
+      grace = now + TERM_GRACE
+      loop do
+        _, status = Process.waitpid2(pid, Process::WNOHANG)
+        return status if status
+        break if now >= grace
+
+        sleep 0.1
+      end
+      Process.kill("KILL", -pid)
+      Process.waitpid2(pid).last
+    rescue Errno::ESRCH, Errno::ECHILD
+      nil
+    end
+
+    def finish(buffer)
+      buffer.byteslice(0, MAX_OUTPUT).to_s.force_encoding(Encoding::UTF_8).scrub("?")
+    end
+
+    # Monotonic: a timeout must not be defeated by ntp stepping the wall clock.
+    def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  end
+
+  # ---------------------------------------------------------------------------
+  # AtomicWrite — property 5.
+  #
+  #   stage <path>.new  ->  validate the staged file  ->  back up  ->  rename
+  #   ->  reload  ->  if the reload refuses, put the old file back and reload again
+  #
+  # `reload` is expected to test-then-reload (`nginx -t && systemctl reload
+  # nginx`): some validators only work on a whole tree, and a reload that
+  # activates an untested tree is the thing this exists to prevent. Reload, never
+  # restart — a restart drops every live connection to twenty-two sites to fix
+  # one of them.
+  # ---------------------------------------------------------------------------
+  module AtomicWrite
+    MAX_BACKUP_BYTES = 4 * 1024 * 1024
+
+    module_function
+
+    # `owner` is the testability seam described on Trusted; production is 0.
+    def replace(path, content, validate:, reload:, mode: 0o644, owner: 0)
+      staged = "#{path}.new"
+      clear_staged!(staged, owner)
+      write_staged(staged, content, mode)
+
+      unless validate.call(staged)
+        File.unlink(staged)
+        raise Invalid.new("#{path}: rejected by validator", "validation")
+      end
+
+      backup = backup!(path, mode, owner)
+      File.rename(staged, path)
+
+      if reload.call
+        # The .bak only ever existed for the rollback path and for a crash
+        # between the rename and the reload. Neither can happen now, and the
+        # first file this mechanism protects is a unit carrying
+        # RAILS_MASTER_KEY — a second copy of that lying around indefinitely is
+        # a worse outcome than losing an undo nobody uses.
+        discard_backup!(path, owner)
+        return :written
+      end
+
+      restore!(path, backup, reload, mode)
+      raise Invalid.new("#{path}: reload refused the new file; previous version restored", "validation")
+    end
+
+    # Removing a site file is the same contract in reverse: keep a copy, unlink,
+    # reload, and put it back if the reload refuses. Without this, "remove a
+    # vhost" would be the one mutating path with no way back.
+    def remove(path, reload:, owner: 0, mode: 0o644)
+      backup = backup!(path, mode, owner)
+      return :absent if backup.nil?
+
+      File.unlink(path)
+      if reload.call
+        discard_backup!(path, owner)
+        return :removed
+      end
+
+      restore!(path, backup, reload, mode)
+      raise Invalid.new("#{path}: reload refused the removal; previous version restored", "validation")
+    end
+
+    # Never unlink blind. The parent directory is root-only, so an lstat here
+    # cannot be raced; but a leftover `.new` that is a symlink or a directory
+    # means something is wrong that a human should look at, not something to
+    # quietly delete.
+    def clear_staged!(staged, owner = 0)
+      stat = begin
+        File.lstat(staged)
+      rescue Errno::ENOENT
+        return
+      end
+
+      raise Failure, "#{staged}: exists and is not a plain file owned by uid #{owner} — refusing to touch it" unless stat.file? && stat.uid == owner
+
+      File.unlink(staged)
+    end
+
+    # O_EXCL|O_NOFOLLOW: if anything at all appears at the staged path between
+    # the check above and this open, the open fails instead of writing through a
+    # symlink into a file we never meant to name.
+    def write_staged(staged, content, mode)
+      File.open(staged, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, mode) do |f|
+        f.write(content)
+        f.flush
+        f.fsync
+      end
+      File.chmod(mode, staged)
+    end
+
+    # Kept on disk as <path>.bak rather than only in memory, so a crash between
+    # the rename and the reload still leaves the operator the old file.
+    #
+    # It is written with the SAME mode as the file it copies, and with
+    # O_NOFOLLOW, for the same reasons write_staged is. File.binwrite would
+    # create it 0644 under the default umask: the first file this protects is
+    # ltvb-app@login.ltvb.nl.service, whose Environment= line is the only copy
+    # of that app's RAILS_MASTER_KEY on the box, so a 0644 backup hands the key
+    # to every one of the eight apps sharing uid 10006.
+    def backup!(path, mode, owner = 0)
+      stat = begin
+        File.lstat(path)
+      rescue Errno::ENOENT
+        return nil
+      end
+
+      raise Failure, "#{path}: not a regular file" unless stat.file?
+      raise Failure, "#{path}: too large to back up" if stat.size > MAX_BACKUP_BYTES
+
+      content = File.binread(path)
+      backup = "#{path}.bak"
+      clear_staged!(backup, owner)
+      File.open(backup, File::WRONLY | File::CREAT | File::EXCL | File::NOFOLLOW, mode) do |f|
+        f.binmode
+        f.write(content)
+        f.flush
+        f.fsync
+      end
+      # O_CREAT applies the mode only when it creates the file, and EXCL means
+      # it always did — but umask still subtracts from it, so say it outright.
+      File.chmod(mode, backup)
+      content
+    end
+
+    # Only ever unlinks a plain file we own. Anything else at that path means
+    # something is wrong that a human should see; the write itself already
+    # succeeded, so this reports by leaving evidence rather than by raising and
+    # calling a completed operation a failure.
+    def discard_backup!(path, owner = 0)
+      backup = "#{path}.bak"
+      stat = begin
+        File.lstat(backup)
+      rescue Errno::ENOENT
+        return
+      end
+
+      File.unlink(backup) if stat.file? && stat.uid == owner
+    end
+
+    # The same mode discipline as backup!: on the remove path the file has
+    # already been unlinked, so this CREATES it, and a plain File.binwrite would
+    # bring a 0600 unit back as 0644 — losing the protection precisely in the
+    # situation where something has already gone wrong.
+    def restore!(path, backup, reload, mode = 0o644)
+      if backup
+        File.open(path, File::WRONLY | File::CREAT | File::TRUNC | File::NOFOLLOW, mode) do |f|
+          f.binmode
+          f.write(backup)
+        end
+        File.chmod(mode, path)
+      else
+        File.unlink(path)
+      end
+      return if reload.call
+
+      # Both the new file and the old one were refused. Nothing here can fix
+      # that; say so loudly and leave the .bak in place.
+      raise Failure.new("#{path}: restored the previous version but the reload still fails — manual repair needed", "broken")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Audit — property 7. One JSON line per call, secrets by digest only.
+  # ---------------------------------------------------------------------------
+  class Audit
+    def initialize(path = AUDIT_PATH)
+      FileUtils.mkdir_p(File.dirname(path), mode: 0o750)
+      @io = File.open(path, File::WRONLY | File::APPEND | File::CREAT, 0o600)
+      @io.sync = true
+    rescue SystemCallError
+      # A daemon that cannot write its audit log must still refuse work rather
+      # than work silently, so this is fatal at boot — but a rotated-away file
+      # at runtime should not take root operations down with it.
+      raise Failure, "cannot open audit log #{path}"
+    end
+
+    def write(event)
+      @io.puts(JSON.generate(event.merge("ts" => Time.now.utc.iso8601(3))))
+    rescue SystemCallError
+      nil
+    end
+
+    def close = @io.close
+
+    # Parameters flagged `secret: true` are recorded by name, digest and length.
+    # The digest is enough to answer "did the key that broke production match
+    # the one we stored?" without the audit log becoming a second copy of every
+    # secret on the box — which is what a log of full parameters would be.
+    def self.redact(params, spec)
+      params.each_with_object({}) do |(key, value), out|
+        if spec.dig(key.to_sym, :secret)
+          # Canonical JSON for a map rather than Hash#to_s: the digest is
+          # compared across deploys, and Ruby has changed how it inspects a
+          # hash between versions. Key order is normalised for the same reason.
+          text = value.is_a?(Hash) ? JSON.generate(value.sort_by { |k, _| k.to_s }.to_h) : value.to_s
+          entry = { "param" => key.to_s, "sha256" => Digest::SHA256.hexdigest(text), "bytes" => text.bytesize }
+          # A secret env block is a map, and WHICH variables were set is the
+          # forensic question ("did this deploy stop setting DATABASE_URL?").
+          # The names are not the secret; the values are, and those stay hashed.
+          entry["keys"] = value.keys.map(&:to_s).sort if value.is_a?(Hash)
+          out[key.to_s] = entry
+        else
+          out[key.to_s] = value
+        end
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Schema — property 2.
+  #
+  # Growth is meant to be mechanical: add an entry here, add a handler with the
+  # matching name. Nothing else in this file knows the verb list, so a new verb
+  # cannot forget validation, timeouts, locking or auditing.
+  #
+  #   mutating: takes the lock, is audited twice (start + result), and any
+  #             :domain / :fqdn parameter must resolve to a MANAGEABLE webspace.
+  #   timeout:  seconds; the child's process group is killed at the deadline.
+  #   params:   name => { type:, required:, default:, secret: }
+  # ---------------------------------------------------------------------------
+  module Schema
+    VERBS = {
+      "ping" => {
+        summary: "protocol handshake", mutating: false, timeout: 5, params: {}
+      },
+
+      # --- the seven verbs inherited from ltvb-deployer -------------------------
+      # Plesk still owns hosting until the licence expires, so these keep their
+      # exact behaviour; only the way they are called changed. sites.discover is
+      # their post-Plesk replacement and already works alongside them.
+      "plesk.domains" => {
+        summary: "list domains and their document roots", mutating: false, timeout: 30, params: {}
+      },
+      "plesk.subdomain.create" => {
+        summary: "create a subdomain (idempotent)", mutating: true, timeout: 300,
+        params: {
+          subdomain: { type: :label,  required: true },
+          domain:    { type: :domain, required: true }
+        }
+      },
+      "plesk.subdomain.docroot" => {
+        summary: "point a subdomain's document root at <fqdn>/<suffix>", mutating: true, timeout: 120,
+        params: {
+          subdomain: { type: :label,   required: true },
+          domain:    { type: :domain,  required: true },
+          # NOT the full www-root. The client sends the suffix ("public") and
+          # the agent composes "<sub>.<domain>/public" — so the directory a
+          # document root can point at is fixed by the hostname, not by the
+          # caller. Empty means the site root.
+          suffix:    { type: :relpath, default: "" }
+        }
+      },
+      "plesk.ruby.enable" => {
+        summary: "enable Passenger/Ruby for a host and pin the version", mutating: true, timeout: 300,
+        params: {
+          fqdn:    { type: :fqdn,    required: true },
+          version: { type: :version, required: true }
+        }
+      },
+      "plesk.reconfigure" => {
+        summary: "regenerate a host's Apache vhost", mutating: true, timeout: 300,
+        params: { fqdn: { type: :fqdn, required: true } }
+      },
+      "plesk.subdomain.remove" => {
+        summary: "remove a subdomain", mutating: true, timeout: 300,
+        params: {
+          subdomain: { type: :label,  required: true },
+          domain:    { type: :domain, required: true }
+        }
+      },
+      "jobs.restart" => {
+        summary: "queue a restart of the manager's Solid Queue worker", mutating: true, timeout: 30, params: {}
+      },
+
+      # --- new ------------------------------------------------------------------
+      "sites.discover" => {
+        summary: "every hostname this server hosts, from disk rather than Plesk",
+        mutating: false, timeout: 60, params: {}
+      },
+      "services.discover" => {
+        summary: "systemd units and supervisor programs relevant to hosting",
+        mutating: false, timeout: 60, params: {}
+      },
+      "http.check" => {
+        summary: "request a host over loopback with its own Host header and SNI",
+        mutating: false, timeout: 30,
+        params: {
+          fqdn: { type: :fqdn,     required: true },
+          path: { type: :url_path, default: "/" },
+          port: { type: :port,     default: 443 },
+          tls:  { type: :bool,     default: true }
+        }
+      },
+
+      # --- nginx ----------------------------------------------------------------
+      # The client sends a RENDER SPEC, never config text. Every parameter below
+      # is a typed knob the agent's own template branches on; there is no
+      # "extra_config" field and there is not going to be one, because the file
+      # this produces is parsed by root and one smuggled `}` would let whoever
+      # can edit an App add a directive of their choosing to twenty-two sites.
+      "nginx.site.write" => {
+        summary: "render and install a site's nginx server blocks", mutating: true, timeout: 120,
+        params: {
+          fqdn:           { type: :fqdn, required: true },
+          kind:           { type: :enum, values: %w[rails php laravel static], required: true },
+          # A document-root suffix under the site's own directory, not a path.
+          suffix:         { type: :relpath, default: "" },
+          staging:        { type: :bool, default: false },
+          tls:            { type: :bool, default: true },
+          hsts:           { type: :bool, default: false },
+          redirect_http:  { type: :bool, default: true },
+          default_server: { type: :bool, default: false },
+          php:            { type: :enum, values: PHP_VERSIONS, default: "8.3" },
+          allow:          { type: :ip_list, default: [] },
+          # git.ltvb.nl runs ActionCable as a separate loopback Puma; an app that
+          # cables from its own process leaves the port off and gets its socket.
+          cable_path:     { type: :config_path },
+          cable_port:     { type: :port },
+          # The directory an `internal` X-Accel-Redirect location aliases. It is
+          # a knob and not config text — the location prefix is XACCEL_LOCATION,
+          # compiled in — but it exists here because the manager's App record can
+          # express it, and a preview that renders a location this daemon would
+          # silently drop is a preview that lies about the served config.
+          xaccel:         { type: :config_path }
+        }
+      },
+      "nginx.site.remove" => {
+        summary: "remove a site's nginx config and reload", mutating: true, timeout: 120,
+        params: { fqdn: { type: :fqdn, required: true } }
+      },
+      "nginx.test" => {
+        summary: "nginx -t against the whole ltvb tree", mutating: false, timeout: 60, params: {}
+      },
+      "nginx.reload" => {
+        summary: "test the tree and reload nginx if it is running", mutating: true, timeout: 60, params: {}
+      },
+
+      # --- systemd --------------------------------------------------------------
+      "systemd.unit.install" => {
+        summary: "render and install a unit for an app or one of its workers",
+        mutating: true, timeout: 120,
+        params: {
+          fqdn:        { type: :fqdn, required: true },
+          # Absent means the app's own Puma; present names a worker beside it
+          # ("jobs", "cable"). Either way the unit NAME is derived, never sent.
+          worker:      { type: :label },
+          description: { type: :line, default: "" },
+          # A subdirectory of the site root — "current" for a release-tree app.
+          workdir:     { type: :relpath, default: "" },
+          ruby:        { type: :version },
+          argv:        { type: :argv },
+          env:         { type: :env, default: {}, secret: true },
+          memory_max:  { type: :size, default: "1G" }
+        }
+      },
+      "systemd.unit.remove" => {
+        summary: "stop, disable and delete a unit this agent installed", mutating: true, timeout: 120,
+        params: { unit: { type: :managed_unit, required: true } }
+      },
+      "systemd.daemon_reload" => {
+        summary: "systemctl daemon-reload", mutating: true, timeout: 60, params: {}
+      },
+      "systemd.enable" => {
+        summary: "enable a unit at boot", mutating: true, timeout: 60,
+        params: {
+          unit: { type: :managed_unit, required: true },
+          now:  { type: :bool, default: false }
+        }
+      },
+      "systemd.disable" => {
+        summary: "disable a unit at boot", mutating: true, timeout: 60,
+        params: {
+          unit: { type: :managed_unit, required: true },
+          now:  { type: :bool, default: false }
+        }
+      },
+      "systemd.restart" => {
+        summary: "start, stop, restart or reload a unit", mutating: true, timeout: 300,
+        params: {
+          unit:   { type: :managed_unit, required: true },
+          action: { type: :enum, values: %w[start stop restart try-restart reload reload-or-restart], default: "restart" },
+          # A caller that is itself a job inside the unit it is restarting must
+          # not block: it would be waiting on the worker that is waiting on it.
+          block:  { type: :bool, default: true }
+        }
+      },
+      "systemd.status" => {
+        summary: "load, active and restart state of a unit", mutating: false, timeout: 30,
+        params: { unit: { type: :unit, required: true } }
+      },
+      "systemd.journal" => {
+        summary: "the last N journal lines for a unit", mutating: false, timeout: 60,
+        params: {
+          unit:  { type: :unit, required: true },
+          lines: { type: :count, min: 1, max: 5000, default: 200 }
+        }
+      },
+
+      # --- php-fpm --------------------------------------------------------------
+      "fpm.pool.write" => {
+        summary: "render and install a site's php-fpm pool", mutating: true, timeout: 120,
+        params: {
+          fqdn:         { type: :fqdn, required: true },
+          php:          { type: :enum, values: PHP_VERSIONS, default: "8.3" },
+          max_children: { type: :count, min: 1, max: 64, default: 10 },
+          memory_limit: { type: :size, default: "256M" }
+        }
+      },
+      "fpm.reload" => {
+        summary: "test the pool tree and reload one php-fpm master", mutating: true, timeout: 60,
+        params: { php: { type: :enum, values: PHP_VERSIONS, default: "8.3" } }
+      },
+
+      # --- directories ----------------------------------------------------------
+      # nginx refuses to START — not reload, start — when a directory named in
+      # access_log is missing, so this is not a convenience: it is the step
+      # without which the first nginx.site.write takes the server down.
+      "dir.ensure" => {
+        summary: "create one of the agent's known per-site directories", mutating: true, timeout: 30,
+        params: {
+          fqdn: { type: :fqdn, required: true },
+          kind: { type: :enum, values: %w[logs releases shared], default: "logs" }
+        }
+      }
+    }.freeze
+
+    module_function
+
+    def verb?(name) = VERBS.key?(name)
+
+    def verbs = VERBS.keys
+
+    def spec(name)
+      VERBS[name] || raise(Invalid.new("unknown verb #{name.inspect}", "unknown_verb"))
+    end
+
+    # The single entry point the tests hammer. Pure: no filesystem, no socket,
+    # no root. Returns a symbol-keyed hash with defaults applied.
+    def validate!(verb, params, webspaces:)
+      raise Invalid.new("verb must be a string", "unknown_verb") unless verb.is_a?(String)
+
+      definition = spec(verb)
+      given = normalize_keys(params)
+      allowed = definition[:params]
+
+      unknown = given.keys - allowed.keys
+      # Hard error, never ignored. A request the agent half-understood is a
+      # request the caller and the agent disagree about, and disagreements about
+      # root operations are how the wrong thing gets deleted.
+      raise Invalid, "#{verb}: unknown parameter(s) #{unknown.map(&:to_s).sort.join(', ')}" if unknown.any?
+
+      allowed.each_with_object({}) do |(name, rules), out|
+        if given.key?(name)
+          out[name] = coerce!(name, given[name], rules, webspaces)
+        elsif rules.key?(:default)
+          out[name] = rules[:default]
+        elsif rules[:required]
+          raise Invalid, "#{verb}: missing required parameter #{name}"
+        end
+
+        enforce_manageable!(verb, definition, name, rules, out[name], webspaces) if out.key?(name)
+      end
+    end
+
+    # JSON gives string keys; a direct caller may use symbols. Accept both, but
+    # refuse a payload carrying both "fqdn" and :fqdn — which of the two the
+    # agent acted on would depend on hash ordering.
+    def normalize_keys(params)
+      raise Invalid, "params must be an object" unless params.is_a?(Hash)
+
+      params.each_with_object({}) do |(key, value), out|
+        raise Invalid, "parameter names must be strings" unless key.is_a?(String) || key.is_a?(Symbol)
+
+        sym = key.to_sym
+        raise Invalid, "duplicate parameter #{sym}" if out.key?(sym)
+
+        out[sym] = value
+      end
+    end
+
+    def coerce!(name, value, rules, webspaces)
+      case rules[:type]
+      when :label        then Types.label!(name, value)
+      when :version      then Types.version!(name, value)
+      when :relpath      then Types.relpath!(name, value)
+      when :url_path     then Types.url_path!(name, value)
+      when :config_path  then Types.config_path!(name, value)
+      when :text         then Types.text!(name, value)
+      when :line         then Types.line!(name, value)
+      when :bool         then Types.bool!(name, value)
+      when :port         then Types.port!(name, value)
+      when :size         then Types.size!(name, value)
+      when :argv         then Types.argv!(name, value)
+      when :env          then Types.env!(name, value)
+      when :ip_list      then Types.ip_list!(name, value)
+      when :enum         then Types.enum!(name, value, rules.fetch(:values))
+      when :count        then Types.count!(name, value, min: rules.fetch(:min), max: rules.fetch(:max))
+      # Read-only verbs (status, journal). Observable is deliberately narrower
+      # than "is a well-formed unit name": handing the web tier the agent's own
+      # journal would expose the audit trail of every privileged call, and
+      # sshd's would expose usernames and source addresses.
+      when :unit         then Units.observable!(name, value)
+      when :managed_unit then Units.controllable!(name, value)
+      when :domain       then known_domain!(name, value, webspaces)
+      when :fqdn         then known_fqdn!(name, value, webspaces)
+      else raise Failure, "schema bug: no such type #{rules[:type].inspect}"
+      end
+    end
+
+    # A hostname the agent has no webspace for has no directory either, so it is
+    # rejected here rather than deeper, where the absence would show up as a
+    # confusing ENOENT on a path the caller never named.
+    def known_domain!(name, value, webspaces)
+      Types.hostname!(name, value)
+      raise Invalid.new("#{name}: #{value} is not a webspace on this server", "unknown_domain") unless webspaces.domain?(value)
+
+      value
+    end
+
+    def known_fqdn!(name, value, webspaces)
+      Types.hostname!(name, value)
+      raise Invalid.new("#{name}: #{value} belongs to no webspace on this server", "unknown_domain") unless webspaces.resolve(value)
+
+      value
+    end
+
+    def enforce_manageable!(verb, definition, name, rules, value, webspaces)
+      return unless definition[:mutating]
+
+      domain = case rules[:type]
+      when :domain then value
+      when :fqdn   then webspaces.resolve(value)&.domain
+      end
+      return if domain.nil? || webspaces.manageable?(domain)
+
+      raise Invalid.new("#{verb}: #{domain} is read-only for the manager (#{name}=#{value})", "not_manageable")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Handlers — one method per verb, named after it. Every value they receive has
+  # already been through the schema, so they contain no validation.
+  # ---------------------------------------------------------------------------
+  class Handlers
+    PLESK          = "/usr/sbin/plesk".freeze
+    SYSTEMCTL      = "/usr/bin/systemctl".freeze
+    SUPERVISORCTL  = "/usr/bin/supervisorctl".freeze
+    JOURNALCTL     = "/usr/bin/journalctl".freeze
+
+    # What systemd.status reports. A fixed list rather than the whole property
+    # set: `systemctl show` with no -p emits two hundred lines including the
+    # unit's full environment, which is how a status call would become a way to
+    # read RAILS_MASTER_KEY back out.
+    UNIT_PROPERTIES = %w[
+      Id LoadState ActiveState SubState UnitFileState MainPID NRestarts
+      MemoryCurrent ExecMainStartTimestamp Result
+    ].freeze
+
+    # dir.ensure's whole vocabulary. `kind` selects a row; nothing in the
+    # request contributes a path segment except the fqdn, which the webspace
+    # table has already resolved.
+    DIR_KINDS = {
+      # 0750, NOT 02750. The unit sets RestrictSUIDSGID=yes, which makes any
+      # mkdir carrying the setgid bit fail with EPERM even as root — so asking
+      # for 02750 here does not produce a setgid directory, it produces no
+      # directory at all, and then nginx refuses to start because its log path
+      # does not exist. Setgid was only ever there so nginx's log FILES would
+      # inherit the group; it is unnecessary, because nginx's master opens them
+      # as root at 0644 and the manager reaches them by traversing this
+      # directory as a member of SITE_LOG_GROUP.
+      "logs"     => { under: :logs, mode: 0o750, owner: :root, group: SITE_LOG_GROUP },
+      "releases" => { under: :site, name: "releases", mode: 0o750, owner: :site, group: SITE_GROUP },
+      "shared"   => { under: :site, name: "shared",   mode: 0o750, owner: :site, group: SITE_GROUP }
+    }.freeze
+
+    def initialize(webspaces:, config:)
+      @webspaces = webspaces
+      @config    = config
+    end
+
+    def call(verb, params, timeout)
+      send(method_for(verb), params, timeout)
+    end
+
+    # Verb names are dotted; method names cannot be. The mapping is mechanical
+    # and the method must already exist, so a schema entry without a handler is
+    # a startup check away from being caught (see CLI --check-config).
+    def method_for(verb)
+      name = :"verb_#{verb.tr('.', '_')}"
+      raise Failure, "no handler for #{verb}" unless respond_to?(name, true)
+
+      name
+    end
+
+    def handles?(verb) = respond_to?(:"verb_#{verb.tr(".", "_")}", true)
+
+    private
+
+    def verb_ping(_params, _timeout)
+      { data: { "agent_version" => VERSION, "protocol" => PROTOCOL, "verbs" => Schema.verbs } }
+    end
+
+    def verb_plesk_domains(_params, timeout)
+      res = plesk!([ PLESK, "db", "-Ne",
+                    "SELECT d.name, COALESCE(h.www_root,'') FROM domains d " \
+                    "LEFT JOIN hosting h ON h.dom_id = d.id ORDER BY d.name;" ], timeout)
+      sites = res.out.each_line.filter_map do |line|
+        fqdn, www_root = line.chomp.split("\t", 2)
+        next if fqdn.to_s.strip.empty?
+
+        { "fqdn" => fqdn.strip, "www_root" => www_root.to_s.strip }
+      end
+      { out: res.out, data: { "domains" => sites } }
+    end
+
+    def verb_plesk_subdomain_create(params, timeout)
+      fqdn = "#{params[:subdomain]}.#{params[:domain]}"
+      info = Exec.run([ PLESK, "bin", "subdomain", "--info", params[:subdomain], "-domain", params[:domain] ], timeout: timeout)
+      return { out: "subdomain #{fqdn} already exists\n" } if info.ok
+
+      res = plesk!([ PLESK, "bin", "subdomain", "--create", params[:subdomain], "-domain", params[:domain] ], timeout)
+      { out: res.out, err: res.err }
+    end
+
+    def verb_plesk_subdomain_docroot(params, timeout)
+      fqdn = "#{params[:subdomain]}.#{params[:domain]}"
+      # The www-root is composed here, from a hostname the schema proved and a
+      # suffix that cannot contain a dot or a slash-dot. The client never gets to
+      # name a directory.
+      www_root = params[:suffix].to_s.empty? ? fqdn : "#{fqdn}/#{params[:suffix]}"
+      res = plesk!([ PLESK, "bin", "subdomain", "--update", params[:subdomain],
+                    "-domain", params[:domain], "-www-root", www_root ], timeout)
+      { out: res.out, err: res.err, data: { "www_root" => www_root } }
+    end
+
+    def verb_plesk_ruby_enable(params, timeout)
+      # Two calls, not one: --enable turns Passenger on, --set-version pins it.
+      # A subdomain created without both gets no Passenger block at all and
+      # Apache serves the directory listing or 403s — the git.ltvb.nl trap.
+      enable = plesk!([ PLESK, "ext", "ruby", "--enable", "-domain", params[:fqdn], "-version", params[:version] ], timeout)
+      pin    = plesk!([ PLESK, "ext", "ruby", "--set-version", "-domain", params[:fqdn], "-version", params[:version] ], timeout)
+      { out: [ enable.out, pin.out ].join, err: [ enable.err, pin.err ].join }
+    end
+
+    def verb_plesk_reconfigure(params, timeout)
+      res = plesk!([ "/usr/local/psa/admin/sbin/httpdmng", "--reconfigure-domain", params[:fqdn] ], timeout)
+      { out: res.out, err: res.err }
+    end
+
+    def verb_plesk_subdomain_remove(params, timeout)
+      res = plesk!([ PLESK, "bin", "subdomain", "--remove", params[:subdomain], "-domain", params[:domain] ], timeout)
+      { out: res.out, err: res.err }
+    end
+
+    def verb_jobs_restart(_params, timeout)
+      # --no-block is mandatory. The caller is itself a job inside this service,
+      # so a blocking restart waits on the worker that is waiting on this call —
+      # deadlocked until SIGKILL. Queuing it lets Solid Queue finish the deploy
+      # and shut down cleanly before systemd starts the new worker.
+      res = Exec.run([ SYSTEMCTL, "restart", "--no-block", "ltvb-apps-jobs" ], timeout: timeout)
+      raise Failure.new("systemctl restart failed: #{res.err}", "exec") unless res.ok
+
+      { out: "queued restart of ltvb-apps-jobs\n" }
+    end
+
+    # Post-Plesk site inventory, read from the filesystem the agent already
+    # knows how to address. Directory names that are not "<label>.<domain>" are
+    # skipped, which is what keeps logs/, bin/, error_docs/ and the assorted
+    # ".bak" and ".laravel-leftovers" strays out of the list for free.
+    def verb_sites_discover(_params, _timeout)
+      sites = @webspaces.domains.flat_map do |domain|
+        hostnames = [ domain ] + subdomain_dirs(domain)
+        hostnames.filter_map { |fqdn| describe_site(fqdn) }
+      end
+      { data: { "sites" => sites } }
+    end
+
+    def verb_services_discover(_params, timeout)
+      { data: { "systemd" => systemd_units(timeout), "supervisor" => supervisor_programs(timeout) } }
+    end
+
+    # Loopback with the real Host header and SNI. Going out to the public DNS
+    # name would test the network; going to 127.0.0.1 with ipaddr= tests THIS
+    # server's vhost selection, which is the thing that breaks during a
+    # migration — and it reaches the staging ports (9080/9443) that are firewalled
+    # off from outside.
+    def verb_http_check(params, timeout)
+      site = @webspaces.resolve(params[:fqdn])
+      http = Net::HTTP.new(site.fqdn, params[:port])
+      http.ipaddr      = "127.0.0.1"
+      http.use_ssl     = params[:tls]
+      http.verify_mode = OpenSSL::SSL::VERIFY_NONE # migration hosts serve self-signed until certbot lands
+      http.open_timeout = [ timeout, 10 ].min
+      http.read_timeout = [ timeout, 10 ].min
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      response = http.start { |c| c.get(params[:path]) }
+      body = response.body.to_s
+
+      { data: {
+        "code" => response.code.to_i,
+        "elapsed_ms" => ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round,
+        "headers" => response.to_hash.slice("location", "content-type", "server", "x-request-id", "x-runtime", "x-powered-by"),
+        "body_bytes" => body.bytesize,
+        # A prefix only. The manager classifies (placeholder page, Rails, PHP
+        # error); the agent stays a transport and never grows opinions that
+        # would need a protocol bump to change.
+        "body_head" => body.byteslice(0, 2048).to_s.force_encoding(Encoding::UTF_8).scrub("?")
+      } }
+      # A health probe that fails is a RESULT, not an agent failure: connection
+      # refused, a TLS handshake error and a timeout are all things the manager
+      # asked about and needs reported, not exceptions. The class name goes into
+      # the payload so a genuine bug in here is still visible rather than
+      # disguised as "the site is down".
+    rescue StandardError => e
+      { data: { "code" => nil, "error" => "#{e.class}: #{e.message}" } }
+    end
+
+    # --- nginx -----------------------------------------------------------------
+
+    def verb_nginx_site_write(params, timeout)
+      site = @webspaces.resolve(params[:fqdn])
+      text = render_site(site, params)
+      path = site_conf_path(site.fqdn)
+
+      # The validator gets the STAGED file, which is named "<fqdn>.conf.new" and
+      # therefore matches no include glob — so `nginx -t` at that moment would
+      # test the tree without it and pass regardless. The real check is the
+      # reload, which is test-then-reload and rolls back; this is only the cheap
+      # structural gate that keeps an obviously truncated render off disk.
+      AtomicWrite.replace(path, text, mode: 0o644,
+                                      validate: ->(staged) { balanced_config?(staged) },
+                                      reload: -> { nginx_reload(timeout) })
+      { out: "wrote #{path}\n", data: { "path" => path, "bytes" => text.bytesize } }
+    end
+
+    def verb_nginx_site_remove(params, timeout)
+      path  = site_conf_path(params[:fqdn])
+      state = AtomicWrite.remove(path, reload: -> { nginx_reload(timeout) })
+
+      { out: "#{path}: #{state}\n", data: { "path" => path, "state" => state.to_s } }
+    end
+
+    # A failing `nginx -t` is a RESULT, not an agent failure — it is the whole
+    # question the caller asked. The exit status comes back in the payload.
+    def verb_nginx_test(_params, timeout)
+      res = Exec.run([ NGINX_BIN, "-t", "-c", NGINX_CONF ], timeout: timeout)
+      { out: res.out, err: res.err, data: { "ok" => res.ok } }
+    end
+
+    def verb_nginx_reload(_params, timeout)
+      raise Failure.new("nginx refused to reload; see nginx.test", "validation") unless nginx_reload(timeout)
+
+      { out: "nginx configuration tested and reloaded\n" }
+    end
+
+    # --- systemd ---------------------------------------------------------------
+
+    def verb_systemd_unit_install(params, timeout)
+      site = @webspaces.resolve(params[:fqdn])
+      unit = unit_name(site, params[:worker])
+      text = render_unit(site, unit, params)
+      path = File.join(SYSTEMD_DIR, unit)
+
+      # 0600: an app unit's Environment= carries RAILS_MASTER_KEY, and eight
+      # internet-facing apps share uid 10006 on this box.
+      AtomicWrite.replace(path, text, mode: 0o600,
+                                      validate: ->(staged) { unit_shaped?(staged) },
+                                      reload: -> { daemon_reload(timeout) && unit_loaded?(unit, timeout) })
+      { out: "installed #{path}\n", data: { "unit" => unit, "path" => path, "bytes" => text.bytesize } }
+    end
+
+    def verb_systemd_unit_remove(params, timeout)
+      unit = params[:unit]
+      # Best effort: a unit that was never enabled, or whose file a human
+      # already deleted, must not be able to keep the file on disk.
+      Exec.run([ SYSTEMCTL, "disable", "--now", unit ], timeout: timeout)
+      state = AtomicWrite.remove(File.join(SYSTEMD_DIR, unit), mode: 0o600,
+                                                               reload: -> { daemon_reload(timeout) })
+
+      { out: "#{unit}: #{state}\n", data: { "unit" => unit, "state" => state.to_s } }
+    end
+
+    def verb_systemd_daemon_reload(_params, timeout)
+      raise Failure.new("systemctl daemon-reload failed", "exec") unless daemon_reload(timeout)
+
+      { out: "daemon-reload\n" }
+    end
+
+    def verb_systemd_enable(params, timeout)
+      systemctl!([ "enable" ] + (params[:now] ? [ "--now" ] : []) + [ params[:unit] ], timeout)
+    end
+
+    def verb_systemd_disable(params, timeout)
+      systemctl!([ "disable" ] + (params[:now] ? [ "--now" ] : []) + [ params[:unit] ], timeout)
+    end
+
+    def verb_systemd_restart(params, timeout)
+      argv = [ params[:action] ]
+      argv << "--no-block" unless params[:block]
+      systemctl!(argv + [ params[:unit] ], timeout)
+    end
+
+    def verb_systemd_status(params, timeout)
+      res = Exec.run([ SYSTEMCTL, "show", "-p", UNIT_PROPERTIES.join(","), params[:unit] ], timeout: timeout)
+      properties = res.out.each_line.filter_map do |line|
+        key, value = line.chomp.split("=", 2)
+        [ key, value ] if key && value
+      end.to_h
+
+      { data: { "unit" => params[:unit], "properties" => properties } }
+    end
+
+    def verb_systemd_journal(params, timeout)
+      res = Exec.run([ JOURNALCTL, "-u", params[:unit], "-n", params[:lines].to_s,
+                      "--no-pager", "--output=short-iso" ], timeout: timeout)
+      { out: res.out, err: res.err, data: { "unit" => params[:unit], "lines" => params[:lines] } }
+    end
+
+    # --- php-fpm ---------------------------------------------------------------
+
+    def verb_fpm_pool_write(params, timeout)
+      site = @webspaces.resolve(params[:fqdn])
+      text = render_template("fpm-pool",
+                              fqdn:         site.fqdn,
+                              user:         site.owner,
+                              group:        SITE_GROUP,
+                              socket:       fpm_socket(site.fqdn),
+                              socket_group: WEB_GROUP,
+                              max_children: params[:max_children],
+                              memory_limit: params[:memory_limit],
+                              error_log:    File.join(SITE_LOG_ROOT, site.fqdn, "php-fpm.log"))
+      path = pool_path(params[:php], site.fqdn)
+
+      AtomicWrite.replace(path, text, mode: 0o644,
+                                      validate: ->(staged) { File.size?(staged).to_i.positive? },
+                                      reload: -> { fpm_reload(params[:php], timeout) })
+      { out: "wrote #{path}\n", data: { "path" => path, "php" => params[:php] } }
+    end
+
+    def verb_fpm_reload(params, timeout)
+      raise Failure.new("php#{params[:php]}-fpm refused to reload", "validation") unless fpm_reload(params[:php], timeout)
+
+      { out: "php#{params[:php]}-fpm tested and reloaded\n" }
+    end
+
+    # --- directories -----------------------------------------------------------
+
+    def verb_dir_ensure(params, _timeout)
+      site = @webspaces.resolve(params[:fqdn])
+      rule = DIR_KINDS.fetch(params[:kind])
+      path = rule[:under] == :logs ? File.join(SITE_LOG_ROOT, site.fqdn) : File.join(site.root, rule[:name])
+      uid  = rule[:owner] == :root ? 0 : uid_of(site.owner)
+
+      created = ensure_dir!(path, rule[:mode], uid, gid_of(rule[:group]))
+      { out: "#{path}: #{created ? 'created' : 'already present'}\n",
+        data: { "path" => path, "created" => created } }
+    end
+
+    # --- helpers ---------------------------------------------------------------
+
+    def plesk!(argv, timeout)
+      res = Exec.run(argv, timeout: timeout)
+      raise Failure.new("#{File.basename(argv.first)} timed out after #{timeout}s", "timeout") if res.timed_out
+      raise Failure.new(res.err.empty? ? res.out : res.err, "exec") unless res.ok
+
+      res
+    end
+
+    def subdomain_dirs(domain)
+      suffix = ".#{domain}"
+      Dir.children(File.join(VHOSTS_ROOT, domain)).select { |name| name.end_with?(suffix) && @webspaces.resolve(name) }.sort
+    rescue SystemCallError
+      []
+    end
+
+    def describe_site(fqdn)
+      site = @webspaces.resolve(fqdn)
+      return nil unless site && File.directory?(site.root)
+
+      docroot = File.directory?(File.join(site.root, "public")) ? "public" : ""
+      {
+        "fqdn" => site.fqdn, "domain" => site.domain, "owner" => site.owner,
+        "apex" => site.apex, "manageable" => site.manageable,
+        "root" => site.root, "docroot_suffix" => docroot,
+        "kind" => guess_kind(site.root),
+        "plesk_vhost" => File.directory?(File.join(PLESK_SYSTEM, site.fqdn)),
+        "certificate" => certificate(site.fqdn)
+      }
+    end
+
+    # A guess, labelled as one. The manager stores the authoritative app_kind;
+    # this exists so a host nobody has registered yet shows up with a sensible
+    # default instead of "unknown".
+    def guess_kind(root)
+      return "rails"   if File.file?(File.join(root, "config", "environment.rb"))
+      return "laravel" if File.file?(File.join(root, "artisan"))
+      return "php"     if File.file?(File.join(root, "index.php")) || File.file?(File.join(root, "public", "index.php"))
+      return "static"  if File.file?(File.join(root, "index.html")) || File.file?(File.join(root, "public", "index.html"))
+
+      "unknown"
+    end
+
+    # /etc/letsencrypt is root-only, so this is one of the things only the agent
+    # can answer — and expiry is exactly what the manager needs to alarm on.
+    def certificate(fqdn)
+      pem = File.read(File.join(LETSENCRYPT, fqdn, "cert.pem"))
+      cert = OpenSSL::X509::Certificate.new(pem)
+      { "present" => true, "not_after" => cert.not_after.utc.iso8601,
+        "issuer" => cert.issuer.to_utf8, "subject" => cert.subject.to_utf8 }
+    rescue Errno::ENOENT, Errno::EACCES, OpenSSL::X509::CertificateError
+      { "present" => false }
+    end
+
+    # --- rendering -------------------------------------------------------------
+    #
+    # Everything below composes paths from the webspace table and from compiled
+    # in constants. The request contributes an fqdn, a handful of booleans and a
+    # value from a closed enum — never a path, never a fragment of config.
+
+    # Keyword form at the call sites, one positional hash at the boundary, so a
+    # handler reads as a list of named values instead of a hash literal.
+    def render_template(name, **vars) = Templates.render(name, vars)
+
+    def site_conf_path(fqdn) = File.join(NGINX_SITES, "#{fqdn}.conf")
+    def fpm_socket(fqdn)     = File.join(PLESK_SYSTEM, fqdn, "php-fpm.sock")
+    def app_socket(fqdn)     = File.join(APP_RUN_ROOT, fqdn, APP_SOCKET)
+    def pool_path(version, fqdn) = File.join(PHP_ROOT, version, "fpm", "pool.d", "#{fqdn}.conf")
+    def fpm_unit(version)    = "php#{version}-fpm.service"
+    def fpm_bin(version)     = "/usr/sbin/php-fpm#{version}"
+    def fpm_conf(version)    = File.join(PHP_ROOT, version, "fpm", "php-fpm.conf")
+
+    # One render call against one template, because there used to be two of each
+    # and they drifted: the index-precedence fix reached the manager's copy and
+    # not this one, and only the site that happened to be re-rendered afterwards
+    # picked it up — admin. and login.rijschool-mos.nl still carried
+    # `index index.php index.html` while student. carried the fix.
+    #
+    # Everything below is a path composed from the webspace table and from
+    # compiled-in constants, or a boolean the schema already checked. The
+    # template does the rest, including both server blocks, so there is no
+    # composition step here for the manager's preview to reimplement differently.
+    def render_site(site, params)
+      ports = params[:staging] ? STAGING_PORTS : LIVE_PORTS
+
+      Templates.render("nginx-site", site_variables(site, params, ports))
+    end
+
+    # A hash rather than keywords: this is a contract with a second renderer
+    # (NginxConfig, which previews and tests exactly these bytes), and a contract
+    # is easier to diff as data than as an argument list.
+    def site_variables(site, params, ports)
+      {
+        fqdn: site.fqdn, kind: params[:kind], staging: params[:staging],
+        tls: params[:tls], redirect_http: params[:redirect_http],
+        default_server: params[:default_server],
+        http_port: ports[:http], https_port: ports[:https],
+        # HSTS is scoped to the host and not the port, so a max-age sent from
+        # :9443 would pin the real site too.
+        hsts: params[:hsts] && !params[:staging], hsts_max_age: HSTS_MAX_AGE,
+        client_max_body: CLIENT_MAX_BODY,
+        cert_dir: File.join(LETSENCRYPT, site.fqdn),
+        log_dir:  File.join(SITE_LOG_ROOT, site.fqdn),
+        # Live and staging share a directory but not a file: the point of staging
+        # is to compare the two, which is impossible once they interleave.
+        log_prefix: params[:staging] ? "staging-" : "",
+        acme_root: ACME_WEBROOT, docroot: document_root(site, params[:suffix]),
+        allow: params[:allow],
+        app_socket: app_socket(site.fqdn), fpm_socket: fpm_socket(site.fqdn),
+        cable_path: params[:cable_path].to_s,
+        # An app that cables from its own process leaves the port off and gets
+        # its own socket rather than a second one.
+        cable_upstream: params[:cable_port] ? "http://127.0.0.1:#{params[:cable_port]}" : "http://unix:#{app_socket(site.fqdn)}:",
+        xaccel_location: XACCEL_LOCATION, xaccel_root: params[:xaccel].to_s
+      }
+    end
+
+    def document_root(site, suffix)
+      suffix.to_s.empty? ? site.root : File.join(site.root, suffix)
+    end
+
+    # --- unit rendering --------------------------------------------------------
+
+    # Derived, never sent. "ltvb-app@git.ltvb.nl.service" is an instance-specific
+    # file that shadows the template, so the unit needs no %i handling; a worker
+    # gets a plain name because its identity has two parts and pushing both
+    # through systemd's instance escaping buys nothing.
+    def unit_name(site, worker)
+      name = worker ? "ltvb-#{worker}-#{site.fqdn.tr('.', '-')}.service" : "ltvb-app@#{site.fqdn}.service"
+      Units.controllable!(:unit, name)
+    end
+
+    def render_unit(site, unit, params)
+      workdir = document_root(site, params[:workdir])
+      shared  = { description: unit_description(params[:description], unit),
+                  user: site.owner, group: SITE_GROUP, working_directory: workdir,
+                  environment: environment_lines(params[:env]), memory_max: params[:memory_max] }
+
+      if params[:worker]
+        # The schema cannot say "required only when worker is set", so the
+        # handler does — as an Invalid, which is the caller's fault and comes
+        # back with the same code a schema rejection would.
+        raise Invalid, "argv: required when worker is given" if params[:argv].nil?
+
+        Templates.render("systemd-worker", shared.merge(exec_start: exec_line(params[:argv])))
+      else
+        raise Invalid, "ruby: required for an app unit" if params[:ruby].nil?
+        raise Invalid, "argv: an app unit's command is derived, not sent" if params[:argv]
+
+        Templates.render("systemd-app",
+                         shared.merge(runtime_directory: "#{File.basename(APP_RUN_ROOT)}/#{site.fqdn}",
+                                      exec_start: exec_line(puma_argv(params[:ruby], app_socket(site.fqdn)))))
+      end
+    end
+
+    def puma_argv(ruby, socket)
+      # `-b` on the command line replaces the binds from config/puma.rb; without
+      # it every app's stock `port ENV.fetch("PORT") { 3000 }` would also open
+      # TCP 3000 and only the first app to boot would get it.
+      #
+      # umask=0007 leaves the socket group-writable so nginx (a member of the
+      # app's group) can connect, while the 0750 runtime directory keeps every
+      # other local user out. login.ltvb.nl's only protection is an IP allowlist
+      # in the vhost, and a world-connectable socket routes straight around it.
+      [ "#{RBENV_ROOT}/versions/#{ruby}/bin/bundle", "exec", "puma",
+        "-e", "production", "-b", "unix://#{socket}?umask=0007" ]
+    end
+
+    # One Environment="KEY=value" payload per entry. The whole assignment is
+    # quoted so spaces and `#` survive, and `%` is doubled because systemd
+    # expands specifiers (%h, %i) inside Environment= values.
+    def environment_lines(env)
+      env.map { |key, value| %("#{unit_quote("#{key}=#{value}")}") }
+    end
+
+    # `$` is doubled on top of that, because systemd DOES expand $FOO in Exec
+    # lines even inside quotes, and an argument is data — never a reference.
+    def exec_line(argv)
+      argv.map { |arg| %("#{unit_quote(arg).gsub('$', '$$')}") }.join(" ")
+    end
+
+    # Block form, so the replacement's own backslash escapes never apply; the
+    # backslash is handled in the same pass as the quote for the same reason.
+    def unit_quote(value)
+      value.gsub(/[\\"]/) { |char| "\\#{char}" }.gsub("%", "%%")
+    end
+
+    def unit_description(text, unit)
+      line = text.to_s.strip
+      line = "#{unit} (managed by apps.ltvb.nl)" if line.empty?
+      line.gsub("%", "%%")
+    end
+
+    # --- validate and reload ---------------------------------------------------
+
+    def balanced_config?(staged)
+      text = File.read(staged)
+      !text.strip.empty? && text.count("{") == text.count("}")
+    end
+
+    def unit_shaped?(staged)
+      text = File.read(staged)
+      text.include?("[Unit]") && text.include?("[Service]")
+    end
+
+    def nginx_reload(timeout)
+      return false unless Exec.run([ NGINX_BIN, "-t", "-c", NGINX_CONF ], timeout: timeout).ok
+      # Reload only what is running. Until the cutover, ltvb-nginx is not up and
+      # Apache still serves; refusing every site write until then would mean the
+      # tree could never be built in the first place, and at that point a clean
+      # `nginx -t` IS the whole check.
+      return true unless unit_active?(NGINX_UNIT, timeout)
+
+      Exec.run([ SYSTEMCTL, "reload", NGINX_UNIT ], timeout: timeout).ok
+    end
+
+    def fpm_reload(version, timeout)
+      return false unless Exec.run([ fpm_bin(version), "-t", "-y", fpm_conf(version) ], timeout: timeout).ok
+      return true unless unit_active?(fpm_unit(version), timeout)
+
+      Exec.run([ SYSTEMCTL, "reload", fpm_unit(version) ], timeout: timeout).ok
+    end
+
+    def daemon_reload(timeout) = Exec.run([ SYSTEMCTL, "daemon-reload" ], timeout: timeout).ok
+
+    # systemd's own verdict on the file it just read. A unit with a bad setting
+    # comes back "error" or "bad-setting" and would otherwise sit on disk
+    # looking installed until the first person tried to start it.
+    def unit_loaded?(unit, timeout)
+      res = Exec.run([ SYSTEMCTL, "show", "-p", "LoadState", "--value", unit ], timeout: timeout)
+      res.ok && res.out.strip == "loaded"
+    end
+
+    def unit_active?(unit, timeout)
+      Exec.run([ SYSTEMCTL, "is-active", "--quiet", unit ], timeout: timeout).ok
+    end
+
+    def systemctl!(argv, timeout)
+      res = Exec.run([ SYSTEMCTL ] + argv, timeout: timeout)
+      raise Failure.new("systemctl #{argv.join(' ')} timed out after #{timeout}s", "timeout") if res.timed_out
+      raise Failure.new(res.err.empty? ? res.out : res.err, "exec") unless res.ok
+
+      { out: res.out.empty? ? "systemctl #{argv.join(' ')}\n" : res.out, err: res.err }
+    end
+
+    # --- filesystem ------------------------------------------------------------
+
+    def ensure_dir!(path, mode, uid, gid)
+      created = false
+      stat = begin
+        File.lstat(path)
+      rescue Errno::ENOENT
+        # mkdir, not mkdir_p. Every parent here is a compiled-in constant that
+        # root created at install time, so a missing one means the agent is
+        # wrong about the shape of the machine — and quietly papering over that
+        # is how a log directory ends up somewhere nobody rotates.
+        Dir.mkdir(path, mode)
+        created = true
+        File.lstat(path)
+      end
+      raise Failure, "#{path}: exists and is not a directory" unless stat.directory?
+
+      # Unconditionally, not only on create: a directory that lost its setgid
+      # bit or its group silently stops being writable by the app that needs it,
+      # and "ensure" has to mean the end state, not the creation event.
+      File.chmod(mode, path)
+      File.chown(uid, gid, path)
+      created
+    end
+
+    def uid_of(name)
+      Etc.getpwnam(name.to_s).uid
+    rescue ArgumentError
+      raise Failure, "user #{name.inspect} does not exist on this system"
+    end
+
+    def gid_of(name)
+      Etc.getgrnam(name.to_s).gid
+    rescue ArgumentError
+      raise Failure, "group #{name.inspect} does not exist on this system"
+    end
+
+    def systemd_units(timeout)
+      res = Exec.run([ SYSTEMCTL, "list-units", "--type=service", "--all", "--plain",
+                      "--no-legend", "--no-pager" ], timeout: timeout)
+      return [] unless res.ok
+
+      globs = @config["service_globs"]
+      res.out.each_line.filter_map do |line|
+        unit, load_state, active, sub, *description = line.split
+        next unless unit && globs.any? { |glob| File.fnmatch?(glob, unit) }
+
+        { "unit" => unit, "load" => load_state, "active" => active, "sub" => sub,
+          "description" => description.join(" ") }
+      end
+    end
+
+    # supervisorctl exits non-zero whenever any program is not RUNNING, so its
+    # exit status says nothing useful; the output is parsed either way.
+    def supervisor_programs(timeout)
+      res = Exec.run([ SUPERVISORCTL, "status" ], timeout: timeout)
+      res.out.each_line.filter_map do |line|
+        name, state, *rest = line.split
+        next unless name && state
+
+        { "program" => name, "state" => state, "detail" => rest.join(" ") }
+      end
+    rescue Failure
+      []
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Wire — NDJSON framing. Split out because the size limit is a security control
+  # and deserves a test that does not need a socket.
+  # ---------------------------------------------------------------------------
+  module Wire
+    module_function
+
+    # nil at clean EOF. Anything longer than the cap is refused without being
+    # buffered: gets(sep, limit) stops reading at the limit, so a client that
+    # streams a gigabyte gets an error after a megabyte, not after a gigabyte.
+    def read_line(io, limit: MAX_LINE_BYTES)
+      line = io.gets("\n", limit)
+      return nil if line.nil?
+      raise Invalid.new("request exceeds #{limit} bytes", "oversize") unless line.end_with?("\n")
+
+      line
+    end
+
+    def parse(line)
+      request = JSON.parse(line, max_nesting: 8, create_additions: false)
+      raise Invalid, "request must be a JSON object" unless request.is_a?(Hash)
+
+      verb = request["verb"]
+      raise Invalid.new("request has no verb", "unknown_verb") unless verb.is_a?(String)
+
+      params = request.fetch("params", {})
+      raise Invalid, "params must be an object" unless params.is_a?(Hash)
+
+      extra = request.keys - %w[id verb params]
+      raise Invalid, "request has unknown field(s) #{extra.sort.join(', ')}" if extra.any?
+
+      [ request["id"].is_a?(String) ? request["id"] : nil, verb, params ]
+    rescue JSON::ParserError => e
+      raise Invalid, "malformed JSON: #{e.message}"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Server
+  # ---------------------------------------------------------------------------
+  class Server
+    # /run is tmpfs and root-owned, so the socket is recreated every boot. It is
+    # created 0660 by umask rather than chmod'd afterwards: between bind() and
+    # chmod() a 0777 socket is briefly open to every uid on the box.
+    SOCKET_UMASK = 0o117
+
+    # How long a mutating verb waits for the lock before telling the caller to
+    # come back. Blocking forever turns one wedged deploy into a queue of them.
+    LOCK_WAIT = 30
+
+    def initialize(config: Config.load, webspaces: Webspaces.load, audit: Audit.new,
+                   socket_path: SOCKET_PATH, lock_path: LOCK_PATH)
+      @config      = config
+      @webspaces   = webspaces
+      @audit       = audit
+      @socket_path = socket_path
+      @lock_path   = lock_path
+      @handlers    = Handlers.new(webspaces: webspaces, config: config)
+      @allowed_uids = resolve_allowed_uids
+      @running     = true
+    end
+
+    def run
+      server = listen
+      # Self-pipe: a signal must interrupt a blocking accept, and a trap handler
+      # cannot safely do anything but write a byte.
+      wake_r, @wake_w = IO.pipe
+      trap("TERM") { shutdown }
+      trap("INT")  { shutdown }
+      trap("HUP")  { reload_requested }
+
+      @audit.write("event" => "start", "agent_version" => VERSION, "protocol" => PROTOCOL,
+                   "socket" => @socket_path, "allowed_uids" => @allowed_uids)
+
+      while @running
+        # EINTR is not an error here — a signal arrived, its handler ran, and
+        # the next pass through the loop reads the self-pipe it wrote to.
+        ready = begin
+          IO.select([ server, wake_r ], nil, nil, 30)
+        rescue Errno::EINTR
+          nil
+        end
+        next unless ready
+
+        drain(wake_r) if ready.first.include?(wake_r)
+        next unless ready.first.include?(server) && @running
+
+        accept_one(server)
+      end
+    ensure
+      File.unlink(@socket_path) if @socket_path && File.socket?(@socket_path)
+      @audit.write("event" => "stop")
+    end
+
+    # One connection at a time, on purpose. Root operations on a single small
+    # server gain nothing from concurrency and lose the guarantee that two of
+    # them never interleave; every verb has a deadline, so a slow call cannot
+    # wedge the daemon indefinitely.
+    def accept_one(server)
+      conn = server.accept_nonblock(exception: false)
+      return if conn == :wait_readable
+
+      begin
+        serve(conn)
+      ensure
+        conn.close unless conn.closed?
+      end
+      # One malformed connection must never take the daemon down: everything
+      # that deploys, renews a certificate or restarts a service goes through
+      # this socket, so an agent that exits on a surprise is an outage. The
+      # audit line is what makes the surprise findable afterwards.
+    rescue StandardError => e
+      @audit.write("event" => "connection_error", "error" => "#{e.class}: #{e.message}",
+                   "backtrace" => e.backtrace&.first(5))
+    end
+
+    def serve(conn)
+      peer = peer_credentials(conn)
+      unless permitted?(peer)
+        @audit.write("event" => "denied", "peer" => peer,
+                     "reason" => "uid not in allowed_uids #{@allowed_uids.inspect}")
+        respond(conn, nil, error_response("caller uid #{peer['uid']} is not permitted", "denied"))
+        return
+      end
+
+      # Several requests may share a connection, answered strictly in order.
+      while (line = Wire.read_line(conn))
+        id, verb, params = Wire.parse(line)
+        respond(conn, id, dispatch(verb, params, peer))
+      end
+      # A framing or credentials error kills the connection rather than the
+      # request: at this point the agent no longer knows where one request ends
+      # and the next begins, so continuing to read would be guessing.
+    rescue Invalid, Failure => e
+      respond(conn, nil, error_response(e.message, e.code))
+    rescue EOFError, Errno::ECONNRESET, Errno::EPIPE
+      nil
+    end
+
+    def dispatch(verb, params, peer)
+      redacted = nil
+      spec = Schema.spec(verb)
+      clean = Schema.validate!(verb, params, webspaces: @webspaces)
+      redacted = Audit.redact(clean, spec[:params])
+
+      if spec[:mutating]
+        # Logged BEFORE the work, so a call that hangs the machine or kills the
+        # agent still left a record of what was being attempted.
+        @audit.write("event" => "call", "phase" => "start", "peer" => peer, "verb" => verb, "params" => redacted)
+        with_lock { timed(verb, spec, clean, peer, redacted) }
+      else
+        timed(verb, spec, clean, peer, redacted)
+      end
+    rescue Invalid, Failure => e
+      # `redacted` is nil when validation itself failed, and the rejected values
+      # are then deliberately NOT logged — a value that failed validation is
+      # exactly the kind of value not to copy into a root-owned log file.
+      audit_result(peer, verb, redacted || rejected_keys(params), false, e.code, 0, e.message)
+      error_response(e.message, e.code)
+    end
+
+    def timed(verb, spec, clean, peer, redacted)
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      result  = @handlers.call(verb, clean, spec[:timeout])
+      ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
+      audit_result(peer, verb, redacted, true, nil, ms, nil)
+
+      { "ok" => true, "out" => result[:out].to_s, "err" => result[:err].to_s,
+        "data" => result[:data], "duration_ms" => ms }
+    rescue Invalid, Failure => e
+      ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
+      audit_result(peer, verb, redacted, false, e.code, ms, e.message)
+      error_response(e.message, e.code)
+      # The verbs that write files raise SystemCallError directly for the cases
+      # nothing here can anticipate — ENOSPC, EROFS, a .bak someone replaced
+      # with a symlink. Without this the exception escapes to accept_one, which
+      # drops the connection: the caller then waits out its full timeout for a
+      # failure the agent already knew about and could have named.
+    rescue SystemCallError => e
+      ms = ((Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000).round
+      audit_result(peer, verb, redacted, false, "io", ms, e.message)
+      error_response("#{verb}: #{e.class}: #{e.message}", "io")
+    end
+
+    # Cross-process exclusion for mutating work. A second agent, a root shell
+    # running the same helper, or a stuck previous call all serialise here — the
+    # single-connection accept loop only protects against this daemon racing
+    # itself.
+    def with_lock
+      File.open(@lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + LOCK_WAIT
+        until lock.flock(File::LOCK_EX | File::LOCK_NB)
+          raise Failure.new("another privileged operation is in progress", "busy") if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+          sleep 0.25
+        end
+        yield
+      end
+    end
+
+    # --- peer identity ---------------------------------------------------------
+
+    # struct ucred { pid_t pid; uid_t uid; gid_t gid; } — three native 32-bit
+    # words on Linux. This is the whole reason the daemon exists on a socket
+    # rather than behind sudo: the kernel tells us who connected, and the answer
+    # cannot be spoofed by the caller.
+    def peer_credentials(conn)
+      raw = conn.getsockopt(Socket::SOL_SOCKET, Socket::SO_PEERCRED)
+      pid, uid, gid = raw.unpack("lLL")
+      { "pid" => pid, "uid" => uid, "gid" => gid, "user" => username(uid) }
+    rescue StandardError => e
+      raise Failure.new("cannot read peer credentials: #{e.message}", "denied")
+    end
+
+    def permitted?(peer) = @allowed_uids.include?(peer["uid"])
+
+    def username(uid)
+      Etc.getpwuid(uid).name
+    rescue ArgumentError
+      nil
+    end
+
+    # Fail closed. An agent that starts with an empty allow-list would accept
+    # nobody, which sounds safe — but it would also look healthy in systemd
+    # while every deploy silently failed. Refuse to start instead.
+    def resolve_allowed_uids
+      uids = Array(@config["allowed_users"]).filter_map do |name|
+        begin
+          Etc.getpwnam(name.to_s).uid
+        rescue ArgumentError
+          nil
+        end
+      end
+      raise Failure, "none of allowed_users #{@config['allowed_users'].inspect} exist on this system" if uids.empty?
+
+      uids.uniq
+    end
+
+    # --- plumbing --------------------------------------------------------------
+
+    def listen
+      FileUtils.mkdir_p(File.dirname(@lock_path), mode: 0o755)
+      remove_stale_socket
+      previous = File.umask(SOCKET_UMASK)
+      begin
+        server = UNIXServer.new(@socket_path)
+      ensure
+        File.umask(previous)
+      end
+      File.chown(0, socket_gid, @socket_path)
+      server
+    end
+
+    # Only ever unlinks something that is actually a socket. /run is root-only,
+    # so this cannot be raced — but "delete whatever is at this path" is a habit
+    # worth not having in a root daemon.
+    def remove_stale_socket
+      return unless File.exist?(@socket_path)
+      raise Failure, "#{@socket_path} exists and is not a socket" unless File.socket?(@socket_path)
+
+      File.unlink(@socket_path)
+    end
+
+    def socket_gid
+      Etc.getgrnam(@config["socket_group"].to_s).gid
+    rescue ArgumentError
+      raise Failure, "socket group #{@config['socket_group'].inspect} does not exist"
+    end
+
+    def respond(conn, id, payload)
+      conn.puts(JSON.generate(payload.merge("id" => id)))
+    rescue Errno::EPIPE, Errno::ECONNRESET
+      nil
+    end
+
+    def error_response(message, code)
+      { "ok" => false, "out" => "", "err" => message, "code" => code, "data" => nil }
+    end
+
+    def audit_result(peer, verb, redacted, ok, code, ms, error)
+      @audit.write("event" => "call", "phase" => "done", "peer" => peer, "verb" => verb,
+                   "params" => redacted, "ok" => ok, "code" => code,
+                   "duration_ms" => ms, "err" => error)
+    end
+
+    def rejected_keys(params)
+      { "rejected_keys" => params.is_a?(Hash) ? params.keys.map(&:to_s).sort : [] }
+    end
+
+    def shutdown
+      @running = false
+      @wake_w&.write_nonblock(".", exception: false)
+    end
+
+    def reload_requested
+      @reload = true
+      @wake_w&.write_nonblock(".", exception: false)
+    end
+
+    def drain(io)
+      io.read_nonblock(4096, exception: false)
+      return unless @reload
+
+      @reload = false
+      @webspaces = Webspaces.load
+      @config    = Config.load
+      @handlers  = Handlers.new(webspaces: @webspaces, config: @config)
+      @allowed_uids = resolve_allowed_uids
+      @audit.write("event" => "reload", "allowed_uids" => @allowed_uids, "domains" => @webspaces.domains)
+    rescue Failure => e
+      # A bad config on reload leaves the OLD config running. Dropping to a
+      # broken table mid-flight would be worse than ignoring the edit.
+      @audit.write("event" => "reload_failed", "error" => e.message)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # CLI
+  # ---------------------------------------------------------------------------
+  module CLI
+    module_function
+
+    def run(argv)
+      case argv[0]
+      when nil       then Server.new.run
+      when "--check" then check
+      when "--verbs" then puts(JSON.pretty_generate(verb_table))
+      when "--version" then puts("ltvb-agentd #{VERSION} (protocol #{PROTOCOL})")
+      else
+        warn("usage: ltvb-agentd [--check|--verbs|--version]")
+        exit 64
+      end
+    rescue Failure, Invalid => e
+      warn("ltvb-agentd: #{e.message}")
+      exit 78 # EX_CONFIG
+    end
+
+    # ExecStartPre runs this: config parsed, users and group resolvable, and
+    # every verb in the schema actually has a handler. A missing handler is a
+    # 500 at deploy time otherwise, discovered by the person deploying.
+    def check
+      config    = Config.load
+      webspaces = Webspaces.load
+      handlers  = Handlers.new(webspaces: webspaces, config: config)
+
+      missing = Schema.verbs.reject { |verb| handlers.handles?(verb) }
+      raise Failure, "verbs without handlers: #{missing.join(', ')}" if missing.any?
+
+      users = Array(config["allowed_users"]).to_h { |name| [ name, uid_of(name) ] }
+      raise Failure, "no allowed_users resolve to a uid" if users.values.none?
+
+      Etc.getgrnam(config["socket_group"].to_s)
+      puts JSON.pretty_generate(
+        "agent_version" => VERSION, "protocol" => PROTOCOL,
+        "verbs" => Schema.verbs.size, "webspaces" => webspaces.domains,
+        "allowed_users" => users, "socket_group" => config["socket_group"]
+      )
+    rescue ArgumentError => e
+      raise Failure, "group #{config['socket_group'].inspect} missing (#{e.message})"
+    end
+
+    def uid_of(name)
+      Etc.getpwnam(name.to_s).uid
+    rescue ArgumentError
+      nil
+    end
+
+    def verb_table
+      Schema::VERBS.transform_values do |spec|
+        {
+          "summary" => spec[:summary], "mutating" => spec[:mutating], "timeout" => spec[:timeout],
+          # Only the type is a Symbol; everything else is already JSON-safe and
+          # stringifying it would turn `default: false` into the truthy "false".
+          "params" => spec[:params].transform_values { |rules|
+            rules.to_h { |key, value| [ key.to_s, value.is_a?(Symbol) ? value.to_s : value ] }
+          }
+        }
+      end
+    end
+  end
+end
+
+# Guarded so the schema and the validators can be `load`ed by the test suite
+# without starting a daemon. The tests are the reason every security decision in
+# this file lives in a pure function.
+LtvbAgent::CLI.run(ARGV) if $PROGRAM_NAME == __FILE__

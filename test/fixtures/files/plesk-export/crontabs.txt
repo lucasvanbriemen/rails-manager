@@ -1,0 +1,44 @@
+# user: ltvb
+#Edit this file to introduce tasks to be run by cron.
+#
+#Each task to run has to be defined through a single line
+#indicating with different fields when the task will be run
+#and what command to run for the task
+#
+#To define the time you can provide concrete values for
+#minute (m), hour (h), day of month (dom), month (mon),
+#and day of week (dow) or use '*' in these fields (for 'any').
+#
+#Notice that tasks will be started based on the cron's system
+#daemon's notion of time and timezones.
+#
+#Output of the crontab jobs (including errors) is sent through
+#email to the user the crontab file belongs to (unless redirected).
+#
+#For example, you can run a backup of all your user accounts
+#at 5 a.m every week with:
+SHELL="/bin/bash"
+#	0	5	*	*	1	tar -zcf /var/backups/home.tgz /home/
+#
+#For more information see the manual pages of crontab(5) and cron(8)
+#
+#m h  dom mon dow   command
+*	*	*	*	*	cd /var/www/vhosts/ltvb.nl/ai.ltvb.nl && php artisan schedule:run >> /dev/null 2>&1
+# user: lucasvanbriemen.nl_p8c08835y9j
+MAILTO=""
+SHELL="/bin/bash"
+*	*	*	*	*	/usr/bin/php '/var/www/vhosts/lucasvanbriemen.nl/calendar.lucasvanbriemen.nl/artisan' 'schedule:run'
+*	*	*	*	*	/usr/bin/php '/var/www/vhosts/lucasvanbriemen.nl/email.lucasvanbriemen.nl/artisan' 'schedule:run'
+*	*	*	*	*	/usr/bin/php '/var/www/vhosts/lucasvanbriemen.nl/github.lucasvanbriemen.nl/artisan' 'schedule:run'
+# user: djtim.eu_aqwzxapl85w
+MAILTO=""
+# user: rijschool-mos.nl_gze6m7rrghq
+MAILTO=""
+SHELL="/bin/sh"
+0	*	*	*	*	/opt/psa/admin/sbin/fetch_url 'https://student.rijschool-mos.nl/data/send-mail.php'
+SHELL="/bin/bash"
+0	0	*	*	*	python3 /var/www/vhosts/rijschool-mos.nl/admin.rijschool-mos.nl/cron/get_users/main.py
+30	*	*	*	*	python3 /var/www/vhosts/rijschool-mos.nl/admin.rijschool-mos.nl/cron/getlessen/main.py
+0	*	*	*	*	python3 /var/www/vhosts/rijschool-mos.nl/admin.rijschool-mos.nl/cron/makelessen/main.py
+# user: voordezorgmanagement._rhc4zy0iyc
+# user: mos-safeguards.com_eea0inbcx8t

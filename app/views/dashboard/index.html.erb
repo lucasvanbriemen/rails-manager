@@ -1,5 +1,39 @@
 <% content_for :title, "Apps" %>
 
+<% if (sys = @system) %>
+  <section class="vitals" aria-label="Server vitals">
+    <div class="vitals__grid">
+      <%= meter sys[:memory]&.dig(:used_fraction), label: "Memory",
+                detail: sys[:memory] && "#{bytes_human sys[:memory][:used]} of #{bytes_human sys[:memory][:total]} · #{bytes_human sys[:memory][:available]} available" %>
+
+      <%= meter sys[:disk]&.dig(:used_fraction), label: "Disk",
+                detail: sys[:disk] && "#{bytes_human sys[:disk][:used]} of #{bytes_human sys[:disk][:total]} · #{bytes_human sys[:disk][:available]} free" %>
+
+      <%# nil until a second sample exists — /proc/stat is cumulative since boot. %>
+      <%= meter sys[:cpu_busy], label: "CPU",
+                detail: sys[:cpu_count] && "#{sys[:cpu_count]} cores · since last page load" %>
+
+      <%# No swap is configured on this host: "none" is the honest reading, not 0%. %>
+      <%= meter sys[:swap]&.dig(:used_fraction), label: "Swap",
+                detail: sys[:swap] ? bytes_human(sys[:swap][:total]) : "none configured" %>
+
+      <div class="vitals__stat">
+        <span class="vitals__label">Load</span>
+        <span class="vitals__number mono"><%= sys[:load] ? ("%.2f" % sys[:load][:one]) : "—" %></span>
+        <span class="vitals__detail">
+          <%= sys[:load] ? ("%.2f / %.2f over 5 / 15 min" % [ sys[:load][:five], sys[:load][:fifteen] ]) : "no data" %>
+        </span>
+      </div>
+
+      <div class="vitals__stat">
+        <span class="vitals__label">Uptime</span>
+        <span class="vitals__number mono"><%= duration_human sys[:uptime_seconds] %></span>
+        <span class="vitals__detail">since last boot</span>
+      </div>
+    </div>
+  </section>
+<% end %>
+
 <div class="apps-wrapper">
   <% @apps.each do |app| %>
     <div class="app">
@@ -9,21 +43,28 @@
       <% else %>
         <a href="<%= app.url %>" target="_blank" rel="noopener" class="end-point"><%= app.fqdn %></a>
       <% end %>
-        <td>
-          <%= status_badge(@statuses[app.id] || { status: :unknown }) %>
-          <% if (n = @open_exceptions[app.id]).to_i.positive? %>
-            <%= link_to app_exception_groups_path(app) do %>
-              <span class="badge badge--exc-open"><%= n %> exception<%= "s" if n > 1 %></span>
-            <% end %>
+      <div class="app__row">
+        <%= status_badge(@statuses[app.id] || { status: :unknown }) %>
+        <% if (n = @open_exceptions[app.id]).to_i.positive? %>
+          <%= link_to app_exception_groups_path(app) do %>
+            <span class="badge badge--exc-open"><%= n %> exception<%= "s" if n > 1 %></span>
           <% end %>
-        </td>
-        <td><%= app.repo? ? "—" : content_tag(:code, app.ruby_version) %></td>
-        <td><span class="muted"><%= app.git_branch %></span></td>
-        <td>
-          <% if (d = app.last_deployment) %>
-            <%= deployment_badge(d) %>
-            <span class="muted"><%= time_ago_in_words(d.created_at) %> ago</span>
-          <% end %>
+        <% end %>
+      </div>
+
+      <div class="app__meta">
+        <span><%= app.repo? ? "—" : content_tag(:code, app.ruby_version) %></span>
+        <span class="muted"><%= app.git_branch %></span>
+      </div>
+
+      <div class="app__row">
+        <% if (d = app.last_deployment) %>
+          <%= deployment_badge(d) %>
+          <span class="muted"><%= time_ago_in_words(d.created_at) %> ago</span>
+        <% else %>
+          <span class="muted">never deployed</span>
+        <% end %>
+      </div>
     </div>
   <% end %>
 </div>

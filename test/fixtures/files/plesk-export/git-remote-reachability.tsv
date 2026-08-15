@@ -1,0 +1,14 @@
+repo_id	domain	fetch_url	key_used	status	detail
+1	lucasvanbriemen.nl	git@github.com:Lucas-van-Briemen/luclucyt.github.io.git	/var/www/vhosts/lucasvanbriemen.nl/.ssh/id_rsa	REACHABLE	1 heads
+2	admin.rijschool-mos.nl	git@github.com:Lucas-van-Briemen/admin.rijschool-mos.nl.git	/var/www/vhosts/rijschool-mos.nl/.ssh/id_rsa	REACHABLE	2 heads
+3	login.rijschool-mos.nl	git@github.com:Lucas-van-Briemen/login.rijschool-mos.nl.git	/var/www/vhosts/rijschool-mos.nl/.ssh/id_rsa_45fd0d2a-7f7c-abd0-51d8-9f05e9ede172	UNREACHABLE	git@github.com: Permission denied (publickey). fatal: Could not read from remote repository. Please make sure you have the correct access rights and the reposit
+4	student.rijschool-mos.nl	git@github.com:Lucas-van-Briemen/student.rijschool-mos.nl.git	/var/www/vhosts/rijschool-mos.nl/.ssh/id_rsa_2542ac56-e1ae-d242-a1f3-18f7ce96978a	UNREACHABLE	git@github.com: Permission denied (publickey). fatal: Could not read from remote repository. Please make sure you have the correct access rights and the reposit
+37	mos-safeguards.com	https://github.com/Lucas-van-Briemen/mos_safeguards.com.git	/var/www/vhosts/mos-safeguards.com/.ssh/id_rsa	REACHABLE	1 heads
+42	voordezorgmanagement.nl	https://gitlab.lucasvanbriemen.nl/lucasvanbriemen/vdzm.git	/var/www/vhosts/voordezorgmanagement.nl/.ssh/id_rsa	UNREACHABLE	fatal: unable to access 'https://gitlab.lucasvanbriemen.nl/lucasvanbriemen/vdzm.git/': SSL: certificate subject name (lucasvanbriemen.nl) does not match target 
+58	components.lucasvanbriemen.nl	https://github.com/lucasvanbriemen/components	/var/www/vhosts/lucasvanbriemen.nl/.ssh/id_rsa	REACHABLE	3 heads
+59	github.lucasvanbriemen.nl	https://github.com/lucasvanbriemen/github.git	/var/www/vhosts/lucasvanbriemen.nl/.ssh/id_rsa	REACHABLE	84 heads
+68	senne.ltvb.nl	(none)	(none)	PUSH_MODE_NO_REMOTE	push-mode repo: the bare repo on this server IS the origin
+69	music.ltvb.nl	https://github.com/lucasvanbriemen/spotify.git	/var/www/vhosts/ltvb.nl/.ssh/id_rsa	REACHABLE	23 heads
+70	login.ltvb.nl	https://github.com/lucasvanbriemen/login	/var/www/vhosts/ltvb.nl/.ssh/id_rsa	REACHABLE	14 heads
+71	mail.ltvb.nl	https://github.com/lucasvanbriemen/email	/var/www/vhosts/ltvb.nl/.ssh/id_rsa	REACHABLE	20 heads
+72	git.ltvb.nl	https://github.com/lucasvanbriemen/github	/var/www/vhosts/ltvb.nl/.ssh/id_rsa	REACHABLE	84 heads

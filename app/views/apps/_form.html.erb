@@ -35,10 +35,29 @@
     <%# ---- Plesk-served Rails app (original behaviour) ---- %>
     <div class="form-row">
       <%= f.text_field :subdomain, placeholder: "login", label: "Subdomain" %>
-      <%= f.select :domain, %w[ltvb.nl lucasvanbriemen.nl], { include_blank: false }, label: "Domain" %>
+      <%= f.select :domain, App::WEBSPACE_DOMAINS, { include_blank: false }, label: "Domain" %>
     </div>
+    <label class="checkbox">
+      <%= f.check_box :apex_confirmed %>
+      <span>This app is the domain itself (apex site)</span>
+    </label>
+    <p class="hint">
+      Six of the live hostnames are apex domains: leave the subdomain blank and tick this.
+      They are served from the webspace's <code><%= App::APEX_WWW_DIR %>/</code> directory —
+      Plesk never creates a <code>&lt;domain&gt;/&lt;domain&gt;/</code> one. Both signals are
+      required together because a blank subdomain is also what a normal app looks like the
+      moment someone wipes its subdomain, and a deploy would then <code>git reset --hard</code>
+      over the apex site's files.
+    </p>
 
     <%= f.text_field :ruby_version, placeholder: "3.3.8", label: "Ruby version" %>
+
+    <label><span>Document root suffix</span><%= f.text_field :doc_root_suffix, label: false, class: "mono", placeholder: "public" %></label>
+    <p class="hint">
+      Relative to the app directory. Rails and Laravel serve from <code>public</code>;
+      a plain PHP or static site leaves this blank. Pointing a site at a
+      <code>public/</code> it doesn't have is the misconfiguration this tool exists to prevent.
+    </p>
 
     <div class="form-row">
       <label><span>Primary DB</span><%= f.select :primary_db_kind, App::PRIMARY_DB_KINDS %></label>
@@ -54,7 +73,77 @@
     <label><span>config/master.key</span><%= f.text_area :master_key, rows: 1, class: "mono", placeholder: "32-char hex (leave blank if app needs no credentials)" %></label>
 
     <label><span>.env</span><%= f.text_area :env_text, rows: 6, class: "mono", placeholder: "DB_HOST=...\nDB_DATABASE=..." %></label>
+
+    <fieldset>
+      <legend>Serving</legend>
+      <p class="hint">
+        Every field here is rendered into an nginx config that root parses, so each one is a
+        typed, validated setting rather than free text — there is deliberately no
+        "extra nginx config" box.
+      </p>
+
+      <label class="checkbox">
+        <%= f.check_box :redirect_http %>
+        <span>Redirect http to https</span>
+      </label>
+      <p class="hint">
+        On for everything that should only be reachable over TLS. Untick only for a site that
+        genuinely serves content on :80 today — turning the redirect on would break it.
+      </p>
+
+      <label class="checkbox">
+        <%= f.check_box :hsts %>
+        <span>Send Strict-Transport-Security</span>
+      </label>
+      <p class="hint">
+        Pins browsers to https for <%= NginxConfig::HSTS_MAX_AGE / 86_400 %> days.
+        Lowering it later has no effect on anyone who already got it.
+      </p>
+
+      <label class="checkbox">
+        <%= f.check_box :default_server %>
+        <span>Default vhost for unmatched requests</span>
+      </label>
+      <p class="hint">
+        Where a request whose SNI/Host matches no other site lands. Exactly one app should have
+        this — two make nginx refuse to start, none makes it "whichever block was read first".
+      </p>
+
+      <div class="form-row">
+        <label><span>Cable path</span><%= f.text_field :cable_path, label: false, class: "mono", placeholder: "/cable" %></label>
+        <label><span>Cable port</span><%= f.number_field :cable_port, placeholder: "28082" %></label>
+      </div>
+      <p class="hint">
+        Websocket endpoint. Leave the port blank when the app cables from its own process; set it
+        when ActionCable runs as a separate Puma on loopback.
+      </p>
+
+      <label><span>X-Accel path</span><%= f.text_field :xaccel_path, label: false, class: "mono", placeholder: "/var/www/vhosts/ltvb.nl/music.ltvb.nl/storage/audio" %></label>
+      <p class="hint">
+        Directory the app may hand out files from. It must then send
+        <code>X-Accel-Redirect: <%= NginxConfig::XACCEL_LOCATION %>&lt;relative path&gt;</code> —
+        a URI, not the absolute path Apache's <code>XSendFile</code> took.
+      </p>
+
+      <label><span>IP allowlist</span><%= f.text_field :ip_allowlist, label: false, class: "mono", placeholder: "62.194.231.108 2001:1c00:9501:6700::/64" %></label>
+      <p class="hint">Space-separated addresses or CIDR blocks. Blank means public. Hostnames are refused.</p>
+    </fieldset>
   <% end %>
+
+  <fieldset>
+    <legend>Auto-deploy on push</legend>
+    <label class="checkbox">
+      <%= f.check_box :auto_deploy %>
+      <span>Deploy automatically when a matching branch is pushed</span>
+    </label>
+    <label><span>Webhook secret</span><%= f.text_field :webhook_secret, label: false, class: "mono", placeholder: "shared secret — paste the same value into GitHub" %></label>
+    <p class="hint">
+      Required. Pushes are authenticated by an HMAC signature over this secret, not by the
+      URL — so the payload URL alone can't trigger a deploy. Set the same value as the
+      webhook's <strong>Secret</strong> in the repo settings.
+    </p>
+    <label><span>Branch (optional)</span><%= f.text_field :webhook_branch, label: false, placeholder: "defaults to the branch above" %></label>
+  </fieldset>
 
   <label><span>Notes</span><%= f.text_area :notes, rows: 2 %></label>
 

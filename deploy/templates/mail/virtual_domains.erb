@@ -1,0 +1,19 @@
+<%= generated_header("Postfix virtual_mailbox_domains — the domains this server is the FINAL DESTINATION for.") -%>
+#
+# A domain listed here is a domain Postfix will NOT do an MX lookup for. If the
+# recipient is not in vmailbox, the mail is rejected — it is never relayed on.
+# So a domain belongs here only if its MX record actually points at this server.
+#
+# Plesk listed all six of its domains here while three of them (djtim.eu,
+# rijschool-mos.nl, mos-safeguards.com) have MX elsewhere, which is why this
+# server currently bounces its own mail to those domains.
+#
+# The value column is ignored by Postfix — only the presence of the key matters
+# — but it is written as "<domain>/" because that is byte-for-byte the shape the
+# running Postfix already accepts.
+<% domain_rows.each do |row| -%>
+<%= row[:name] %>	<%= row[:name] %>/
+<% end -%>
+<% if domain_rows.empty? -%>
+# (no domain accepts local delivery)
+<% end -%>

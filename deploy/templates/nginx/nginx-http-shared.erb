@@ -1,0 +1,50 @@
+# Generated from nginx-http-shared.erb — do not edit by hand.
+#
+# http{} context. Must be included once, before any site config: every rendered
+# server block references the log format and the maps defined here.
+
+server_tokens off;
+
+# Websocket upgrade. Connection must say "upgrade" only when the client asked
+# for it and "close" otherwise; hard-coding "upgrade" breaks keepalive for every
+# ordinary request that shares the connection.
+map $http_upgrade $ltvb_connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# SSO bearer tokens ride in ?auth_token= and are written verbatim into the
+# access logs today, where they are readable by anything that can read a log and
+# survive in whatever the logs are shipped to. Redact before writing rather than
+# scrubbing afterwards: a line that never contained the token cannot leak it.
+#
+# The pattern is greedy, so one pass rewrites the LAST occurrence; the second
+# pass catches a duplicated parameter. Two passes covers every real request at a
+# fixed cost per line, which is why this is not a loop.
+map $request_uri $ltvb_scrubbed_uri_once {
+    default $request_uri;
+    "~<%= auth_token_pattern %>" "<%= auth_token_replacement %>";
+}
+
+map $ltvb_scrubbed_uri_once $ltvb_scrubbed_uri {
+    default $ltvb_scrubbed_uri_once;
+    "~<%= auth_token_pattern %>" "<%= auth_token_replacement %>";
+}
+
+# The raw request line ($request) is deliberately not used here: it carries the
+# query string, tokens and all, which is precisely what must not be logged. The
+# line is reassembled from the scrubbed URI instead.
+log_format ltvb_scrubbed '$remote_addr - $remote_user [$time_local] '
+                         '"$request_method $ltvb_scrubbed_uri $server_protocol" '
+                         '$status $body_bytes_sent '
+                         '"$http_referer" "$http_user_agent" '
+                         'rt=$request_time uct=$upstream_connect_time urt=$upstream_response_time';
+
+# TLS session state is a single shared zone for the whole box. It cannot live in
+# a server block: 20 server blocks declaring the same zone name is a duplicate
+# zone and nginx refuses to start.
+ssl_session_cache   shared:ltvb_tls:10m;
+ssl_session_timeout 1d;
+# Tickets without rotation are worse than no tickets — the key lives for the
+# lifetime of the process and breaks forward secrecy for every session it signed.
+ssl_session_tickets off;

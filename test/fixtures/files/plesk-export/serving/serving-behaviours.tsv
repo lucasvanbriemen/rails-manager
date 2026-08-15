@@ -1,0 +1,23 @@
+fqdn	http_to_https_redirect	hsts_header	ip_allowlist	errordoc_count	directory_auth	xsendfile	websocket_proxy	passenger	alias_redirect_rewrite_count
+admin.mos-safeguards.com	yes	none	none	14	Domain statistics	none	none	no	4
+admin.rijschool-mos.nl	yes	none	none	14	Domain statistics	none	none	no	4
+ai.lucasvanbriemen.nl	no	none	none	56	Domain statistics	none	none	no	12
+aio.ltvb.nl	yes	none	none	0	Domain statistics	none	none	yes	4
+apps.ltvb.nl	yes	none	none	0	Domain statistics	none	none	yes	4
+components.lucasvanbriemen.nl	no	none	none	56	Domain statistics	none	none	no	12
+djtim.eu	yes	none	none	14	Domain statistics	none	none	no	6
+git.ltvb.nl	yes	none	none	14	Domain statistics	none	ProxyPass /cable ws://127.0.0.1:28082/cable || ProxyPass /cable ws://127.0.0.1:28082/cable	yes	9
+github.lucasvanbriemen.nl	no	none	none	56	Domain statistics	none	ProxyPass /app wss://localhost:8080/app || RewriteRule ^/(.*)$ "wss://localhost:8080/$1" [P,L]	no	15
+login.ltvb.nl	yes	none	Require ip 62.194.231.108 2001:1c00:9501:6700::/64 93.184.105.110 87.106.231.214 127.0.0.1 ::1	14	Domain statistics	none	none	yes	5
+login.rijschool-mos.nl	yes	none	none	14	Domain statistics	none	none	no	4
+ltvb.nl	yes	none	none	14	Domain statistics	none	none	no	6
+lucasvanbriemen.nl	no	Strict-Transport-Security "max-age=15768000; includeSubDomains"	none	28	Domain statistics	none	none	no	8
+mail.ltvb.nl	yes	none	none	14	Domain statistics	none	none	yes	5
+mos-safeguards.com	yes	none	none	14	Domain statistics	none	none	no	6
+music.ltvb.nl	yes	none	none	14	Domain statistics	XSendFile On || XSendFilePath /var/www/vhosts/ltvb.nl/music.ltvb.nl/storage/audio || XSendFile On || XSendFilePath /var/www/vhosts/ltvb.nl/music.ltvb.nl/storage/audio	none	yes	5
+rijschool-mos.nl	yes	none	none	14	Domain statistics	none	none	no	8
+senne.ltvb.nl	yes	none	none	14	 ,Domain statistics,Private Git Access,Private Git Additional Users Access	none	none	no	4
+student.rijschool-mos.nl	yes	none	none	14	Domain statistics	none	none	no	4
+voordezorgmanagement.nl	yes	none	none	28	Domain statistics	none	none	no	12
+webmail.ltvb.nl	yes	none	none	0	none	none	none	no	1
+webmail.lucasvanbriemen.nl	no	Strict-Transport-Security "max-age=15768000; includeSubDomains"	none	0	none	none	none	no	1

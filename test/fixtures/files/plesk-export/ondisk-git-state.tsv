@@ -1,0 +1,8 @@
+path	owner	plesk_managed	remote_origin_url	branch	head_commit	head_date	dirty_files	upstream	remote_status
+/var/www/vhosts/ltvb.nl/aio.ltvb.nl	ltvb	no (manual clone)	git@github.com:lucasvanbriemen/all-in-one.git	master	6d889099b7412540ce152e2cce4fe09b3991be48	2026-08-15 13:05:32 +0200	3	(NO UPSTREAM)	REACHABLE
+/var/www/vhosts/ltvb.nl/apps.ltvb.nl	ltvb	no (manual clone)	git@github.com:lucasvanbriemen/rails-manager.git	main	0403e4a96f3852c94ce8e03b54860bde7280622a	2026-07-11 19:00:41 +0200	1	(NO UPSTREAM)	REACHABLE
+/var/www/vhosts/ltvb.nl/git.ltvb.nl	ltvb	yes	git@github.com:lucasvanbriemen/github.git	main	8ff194a5c417573c0df3d25070d9eb19a24789a3	2026-07-30 22:31:19 +0200	1	(NO UPSTREAM)	REACHABLE
+/var/www/vhosts/ltvb.nl/mail.ltvb.nl	ltvb	yes	https://github.com/lucasvanbriemen/email	main	24d63143849f472bba92e9c1da109e06490c4a59	2026-08-01 14:05:11 +0200	2	(NO UPSTREAM)	REACHABLE
+/var/www/vhosts/ltvb.nl/music.ltvb.nl	ltvb	yes	https://github.com/lucasvanbriemen/spotify	main	67584dc75dccd64910d5f52d794891a2f3b7b470	2026-08-12 23:57:34 +0200	20	(NO UPSTREAM)	REACHABLE
+/var/www/vhosts/ltvb.nl/ui-components.laravel-wrong.bak	ltvb	no (manual clone)	https://github.com/lucasvanbriemen/components	main	3cfb9183b246640a209b381819e59941989ec86b	2026-06-13 12:32:05 +0200	0	origin/main	REACHABLE
+/var/www/vhosts/ltvb.nl/ui-components	ltvb	no (manual clone)	https://github.com/lucasvanbriemen/ui-components.git	main	a36b8a22a4ee8abbf60012021dfd806d78373c3d	2026-08-09 15:12:07 +0200	0	origin/main	REACHABLE

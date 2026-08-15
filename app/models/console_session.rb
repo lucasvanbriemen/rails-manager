@@ -1,9 +1,18 @@
-# A live `rails console` for a managed app, run under a PTY by
-# ConsoleRunner inside the jobs service. Web (Passenger) and job (systemd)
-# are separate processes, so all interaction flows through this row: the UI
-# polls `output` and drops commands into the `pending_input` mailbox.
+# A live REPL for a managed app — `rails console`, `php artisan tinker`, the
+# app's own `mysql`, or a login shell — run under a PTY by ConsoleRunner inside
+# the jobs service. Web (Passenger) and job (systemd) are separate processes,
+# so all interaction flows through this row: the UI polls `output` and drops
+# commands into the `pending_input` mailbox.
 class ConsoleSession < ApplicationRecord
   STATUSES = %w[queued running closed failed].freeze
+
+  # What ConsoleRunner spawns. `rails` is the default so every row that existed
+  # before this column did keeps behaving exactly as it did.
+  KINDS = %w[rails laravel mysql shell].freeze
+
+  # Kinds whose app_kind ships an `artisan` front controller. Plain-PHP and
+  # static apps have no REPL of their own — they get `shell` and `mysql`.
+  TINKER_APP_KINDS = %w[laravel cron].freeze
 
   MAX_OUTPUT      = 200_000
   IDLE_TIMEOUT    = 10.minutes
@@ -13,10 +22,23 @@ class ConsoleSession < ApplicationRecord
   belongs_to :app
 
   validates :status, inclusion: { in: STATUSES }
+  validates :kind, inclusion: { in: KINDS }
 
   scope :open_now, -> { where(status: %w[queued running]) }
 
   def finished? = %w[closed failed].include?(status)
+
+  # Which consoles are offerable for an app. A repo checkout has no runtime and
+  # no database, so it gets a shell and nothing else; everything else can reach
+  # its own MySQL if its .env names one (ConsoleRunner says so if it doesn't).
+  def self.kinds_for(app)
+    return %w[shell] if app.repo?
+
+    kinds = []
+    kinds << "rails"   if app.ruby?
+    kinds << "laravel" if TINKER_APP_KINDS.include?(app.app_kind)
+    kinds + %w[mysql shell]
+  end
 
   # Same atomic-append pattern as Deployment#append_log.
   def append_output(chunk)

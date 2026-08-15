@@ -1,0 +1,26 @@
+<%= generated_header("Postfix virtual_alias_maps — address rewriting, applied BEFORE mailbox lookup.") -%>
+#
+# Order matters and is not obvious: Postfix rewrites through this map first, and
+# only then looks the result up in vmailbox. An entry here whose key is also a
+# mailbox therefore DIVERTS that mailbox rather than copying it. MailAlias
+# refuses to store such a row and MailConfig refuses to render one.
+#
+# An "@<domain>" key is the catch-all. A domain whose policy is "reject" has no
+# line at all — the ABSENCE of a key is what makes Postfix reject an unknown
+# recipient, so there is nothing to write.
+#
+# A domain that FORWARDS its catch-all is preceded by one "user@domain ->
+# user@domain" line per mailbox on it. Postfix's search order is user@domain,
+# then user, then @domain LAST, so without those the wildcard would answer for
+# the domain's own mailboxes too and divert every one of them to the forward
+# target. They rewrite the address to itself, and vmailbox then delivers it.
+#
+# Plesk's own plumbing is deliberately not carried over — drweb@, kluser@,
+# anonymous@ and mailer-daemon@ -> localhost.localdomain on every domain — but
+# its one identity entry per mailbox was this same guard, and that part is kept.
+<% alias_rows.each do |row| -%>
+<%= row[:source] %>	<%= row[:destinations].join(", ") %>
+<% end -%>
+<% if alias_rows.empty? -%>
+# (no alias configured)
+<% end -%>

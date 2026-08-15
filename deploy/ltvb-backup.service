@@ -1,0 +1,55 @@
+# The clock behind `rake backup:run`.
+#
+# Without this unit the whole backup system is a rake task nobody ever calls:
+# root's crontab holds one line (rails-deploy-watch.sh), no /etc/cron.d entry
+# mentions backup, and the only backup timer systemd knows about is
+# dpkg-db-backup. Meanwhile /etc/cron.daily/50plesk-daily is still writing
+# /var/lib/psa/dumps/mysql.daily.dump.0.gz every morning and dies with the
+# licence on 2026-09-01.
+#
+# Root, not `ltvb`: the webspaces are 0750 owner:psaserv, /etc/ltvb and the
+# crontabs are root-only, /etc/letsencrypt/{live,archive} are 0700 and the
+# MariaDB credentials are in a root-owned my.cnf. A run as any other uid
+# produces a PARTIAL backup that is missing most of what matters.
+#
+# Install as root:
+#
+#   install -o root -g root -m 0644 deploy/ltvb-backup.service /etc/systemd/system/ltvb-backup.service
+#   install -o root -g root -m 0644 deploy/ltvb-backup.timer   /etc/systemd/system/ltvb-backup.timer
+#   systemctl daemon-reload && systemctl enable --now ltvb-backup.timer
+#   systemctl list-timers ltvb-backup.timer
+#   systemctl start ltvb-backup.service    # take one now and watch it
+#   journalctl -u ltvb-backup -f
+#
+[Unit]
+Description=ltvb nightly backup (dump, archive, and prove one dump restores)
+# The dumps go through mysqld's socket; starting before it is up would fail the
+# whole run rather than one database.
+After=network.target mariadb.service
+Wants=mariadb.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/var/www/vhosts/ltvb.nl/apps.ltvb.nl
+Environment=HOME=/root
+# Same rbenv the app runs under, spelled out rather than inherited: a timer has
+# no login shell, so none of the profile that puts these on PATH has run.
+#
+# Retention runs AFTER the backup and runs even when the backup exited non-zero,
+# which is why this is one shell line and not ExecStart + ExecStartPost: systemd
+# skips ExecStartPost entirely when ExecStart fails, and a week of failed
+# verifications would then fill the disk it is protecting. The run's exit status
+# is what the unit reports, so `rake backup:run` refusing to call an unproven
+# backup a success is still what turns this unit red.
+ExecStart=/bin/bash -lc 'export RBENV_ROOT=/var/www/vhosts/ltvb.nl/.rbenv; export PATH=$RBENV_ROOT/shims:$RBENV_ROOT/bin:$PATH; export RAILS_ENV=production; bundle exec rake backup:run; rc=$?; bundle exec rake backup:prune || true; exit $rc'
+# A backup that takes longer than this has hung; killing it leaves a `running`
+# row, which Backup.abandon_stale_runs! turns into a FAILED one at the next
+# prune so it stops protecting its own directory forever.
+TimeoutStartSec=4h
+# No Restart=: a retry an hour later is the timer's job (Persistent=true), and
+# a failing run that restarts in a loop would fill the disk it is protecting.
+
+[Install]
+WantedBy=multi-user.target
