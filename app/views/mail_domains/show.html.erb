@@ -113,9 +113,9 @@
                 <td class="table__actions">
                   <% if can?(:update, :apps) %>
                     <%= button(text: "Edit", href: edit_mail_domain_mailbox_path(@domain, mailbox), variant: :text) %>
-                    <%= button(text: mailbox.credentialed? ? "Reset password" : "Generate password",
-                               href: reset_password_mail_domain_mailbox_path(@domain, mailbox), method: :post, variant: :text,
-                               data: { turbo_confirm: "Generate a new password for #{mailbox.address}? It is shown once and the old one stops working immediately." }) %>
+                    <%# Both ways to set one live behind this: choose a password, or generate one. %>
+                    <%= button(text: mailbox.credentialed? ? "Change password" : "Set password",
+                               href: "#{edit_mail_domain_mailbox_path(@domain, mailbox)}#password", variant: :text) %>
                   <% end %>
                 </td>
               </tr>

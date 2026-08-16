@@ -30,7 +30,10 @@ Rails.application.routes.draw do
 
   resources :mail_domains, path: "mail/domains", except: [ :index ] do
     resources :mailboxes, only: %i[new create edit update destroy] do
-      post :reset_password, on: :member
+      member do
+        post  :reset_password # generate one and show it once
+        patch :set_password   # choose one
+      end
     end
     resources :mail_aliases, path: "aliases", only: %i[new create edit update destroy]
   end

@@ -66,6 +66,64 @@ class MailboxesControllerTest < ActionDispatch::IntegrationTest
     assert mailbox.password_set_at.present?
   end
 
+  test "a chosen password is stored as a digest that authenticates it" do
+    mailbox = @domain.mailboxes.create!(local_part: "a")
+    chosen  = "correct-horse-battery-staple"
+
+    patch set_password_mail_domain_mailbox_path(@domain, mailbox),
+          params: { mailbox: { password: chosen, password_confirmation: chosen } }, headers: as
+
+    mailbox.reload
+    assert mailbox.authenticate(chosen)
+    assert_not mailbox.authenticate("something else")
+    assert_match %r{\A\$6\$}, mailbox.password_digest
+    assert mailbox.password_set_at.present?
+  end
+
+  test "a mismatched confirmation changes nothing" do
+    mailbox = @domain.mailboxes.create!(local_part: "a")
+
+    patch set_password_mail_domain_mailbox_path(@domain, mailbox),
+          params: { mailbox: { password: "a-long-enough-one", password_confirmation: "a-long-enough-two" } },
+          headers: as
+
+    assert_not mailbox.reload.credentialed?
+  end
+
+  test "a short password is refused" do
+    mailbox = @domain.mailboxes.create!(local_part: "a")
+    short   = "a" * (MailboxesController::MINIMUM_PASSWORD_LENGTH - 1)
+
+    patch set_password_mail_domain_mailbox_path(@domain, mailbox),
+          params: { mailbox: { password: short, password_confirmation: short } }, headers: as
+
+    assert_not mailbox.reload.credentialed?
+  end
+
+  # Mailbox#password= reads blank as "no credential", so were the password part
+  # of the settings form's params, saving that form without touching the
+  # password field would silently drop the mailbox out of the passwd-file.
+  test "saving the settings form leaves an existing password alone" do
+    mailbox = @domain.mailboxes.create!(local_part: "a")
+    mailbox.update!(password: "keep-this-one-please")
+
+    patch mail_domain_mailbox_path(@domain, mailbox),
+          params: { mailbox: { local_part: "a", notes: "edited", password: "" } }, headers: as
+
+    assert mailbox.reload.credentialed?
+    assert mailbox.authenticate("keep-this-one-please")
+  end
+
+  test "setting a password is refused with read-only permission" do
+    mailbox = @domain.mailboxes.create!(local_part: "a")
+
+    patch set_password_mail_domain_mailbox_path(@domain, mailbox),
+          params: { mailbox: { password: "a-long-enough-one", password_confirmation: "a-long-enough-one" } },
+          headers: as({ "apps" => %w[read] })
+
+    assert_not mailbox.reload.credentialed?
+  end
+
   test "resetting is refused with read-only permission" do
     mailbox = @domain.mailboxes.create!(local_part: "a")
 
