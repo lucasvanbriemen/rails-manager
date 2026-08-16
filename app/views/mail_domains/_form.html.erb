@@ -1,0 +1,72 @@
+<%= form_with model: domain, url: (domain.new_record? ? mail_domains_path : mail_domain_path(domain)),
+              html: { class: "form" } do |f| %>
+  <% if domain.errors.any? %>
+    <div class="flash flash--alert"><%= domain.errors.full_messages.to_sentence %></div>
+  <% end %>
+
+  <div class="field">
+    <%= f.label :name, "Domain" %>
+    <%= f.text_field :name, class: "mono", placeholder: "example.com" %>
+  </div>
+
+  <div class="field--check">
+    <%= f.check_box :active %>
+    <%= f.label :active, "Active" %>
+  </div>
+  <p class="field__hint">
+    Off retires the domain without losing its mailboxes, their quotas or their Maildir paths.
+  </p>
+
+  <div class="field--check">
+    <%= f.check_box :local_delivery %>
+    <%= f.label :local_delivery, "This server is the final destination (local delivery)" %>
+  </div>
+  <p class="field__hint">
+    Controls <code>virtual_mailbox_domains</code>, which is not a list of domains we care about —
+    it is a list of domains this machine claims final delivery for. For a listed domain Postfix
+    looks the recipient up in <code>virtual_mailbox_maps</code>, finds nothing and rejects; it never
+    falls through to DNS. Leave this <strong>off</strong> when the domain's MX points elsewhere,
+    or this server becomes a black hole for it.
+  </p>
+
+  <fieldset>
+    <legend>Catch-all</legend>
+    <p class="field__hint">What happens to mail for an address that does not exist on this domain.</p>
+
+    <div class="field">
+      <%= f.label :catch_all, "Policy" %>
+      <%= f.select :catch_all, MailDomain::CATCH_ALL_POLICIES.map { |p| [ p, p ] }, include_blank: false %>
+      <p class="field__hint">
+        Only the two policies that render differently are offered. Plesk also had "bounce", but for
+        a virtual domain Postfix cannot accept-then-bounce distinguishably from rejecting at RCPT
+        time — both end as a 550 to the sender.
+      </p>
+    </div>
+
+    <div class="field">
+      <%= f.label :catch_all_target, "Forward unmatched mail to" %>
+      <%= f.text_field :catch_all_target, class: "mono", placeholder: "someone@example.com" %>
+      <p class="field__hint">Required when the policy is <code>forward</code>, ignored otherwise.</p>
+    </div>
+  </fieldset>
+
+  <div class="field">
+    <%= f.label :dkim_selector, "DKIM selector" %>
+    <%= f.text_field :dkim_selector, class: "mono", placeholder: "default" %>
+    <p class="field__hint">
+      Blank means the domain does not sign. The key path is derived from the selector
+      (<code><%= MailConfig::DKIM_ROOT %>/&lt;domain&gt;/&lt;selector&gt;</code>) rather than stored —
+      a stored path is a path someone can point at another domain's key and sign as them.
+    </p>
+  </div>
+
+  <div class="field">
+    <%= f.label :notes, "Notes" %>
+    <%= f.text_area :notes, rows: 3 %>
+  </div>
+
+  <div class="form-actions">
+    <%= button(text: domain.new_record? ? "Add domain" : "Save", type: :submit) %>
+    <%= button(text: "Cancel", href: (domain.new_record? ? mail_path : mail_domain_path(domain)), variant: :text) %>
+  </div>
+<% end %>

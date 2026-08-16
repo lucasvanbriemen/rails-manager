@@ -1,0 +1,54 @@
+<%= form_with model: mail_alias,
+              url: (mail_alias.new_record? ? mail_domain_mail_aliases_path(domain) : mail_domain_mail_alias_path(domain, mail_alias)),
+              html: { class: "form" } do |f| %>
+  <% if mail_alias.errors.any? %>
+    <div class="flash flash--alert"><%= mail_alias.errors.full_messages.to_sentence %></div>
+  <% end %>
+
+  <div class="field">
+    <%= f.label :local_part, "Address" %>
+    <div class="input-suffix">
+      <%= f.text_field :local_part, class: "mono", placeholder: "info" %>
+      <span class="input-suffix__label mono">@<%= domain.name %></span>
+    </div>
+    <p class="field__hint">
+      This must not also be a mailbox on this domain. Postfix consults
+      <code>virtual_alias_maps</code> before <code>virtual_mailbox_maps</code>, so an alias over a
+      mailbox does not "also" forward — it replaces delivery, and the mailbox silently stops
+      receiving.
+    </p>
+  </div>
+
+  <div class="field">
+    <%= label_tag "mail_alias[destinations_text]", "Forwards to" %>
+    <%= text_area_tag "mail_alias[destinations_text]", mail_alias.destination_list.join("\n"),
+                      rows: 4, class: "mono", placeholder: "someone@example.com" %>
+    <p class="field__hint">
+      One address per line. Postfix joins multiple destinations with <code>, </code> at render time,
+      so the separator is never part of the data — a comma typed into a line stays inside that one
+      address, where it is rejected as invalid.
+    </p>
+  </div>
+
+  <div class="field--check">
+    <%= f.check_box :enabled %>
+    <%= f.label :enabled, "Enabled" %>
+  </div>
+  <p class="field__hint">A disabled alias is left out of the <code>virtual</code> map entirely.</p>
+
+  <div class="field">
+    <%= f.label :notes, "Notes" %>
+    <%= f.text_area :notes, rows: 3 %>
+  </div>
+
+  <div class="form-actions">
+    <%= button(text: mail_alias.new_record? ? "Add alias" : "Save", type: :submit) %>
+    <%= button(text: "Cancel", href: mail_domain_path(domain), variant: :text) %>
+    <% if !mail_alias.new_record? && can?(:delete, :apps) %>
+      <span class="form-actions__spacer"></span>
+      <%= button(text: "Delete", href: mail_domain_mail_alias_path(domain, mail_alias), method: :delete,
+                 variant: :outline, class: "is-danger",
+                 data: { turbo_confirm: "Delete the alias #{mail_alias.source}?" }) %>
+    <% end %>
+  </div>
+<% end %>

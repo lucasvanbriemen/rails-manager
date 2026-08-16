@@ -21,6 +21,20 @@ Rails.application.routes.draw do
     end
   end
 
+  # Mail administration. Flat controller names rather than a `Mail::` namespace
+  # on purpose: the mail gem (an ActionMailer dependency) already owns the
+  # top-level `Mail` constant, and reopening it from an autoloaded controller is
+  # a collision waiting to happen.
+  get "mail", to: "mail_domains#index", as: :mail
+  get "mail/config", to: "mail_config#show", as: :mail_config
+
+  resources :mail_domains, path: "mail/domains", except: [ :index ] do
+    resources :mailboxes, only: %i[new create edit update destroy] do
+      post :reset_password, on: :member
+    end
+    resources :mail_aliases, path: "aliases", only: %i[new create edit update destroy]
+  end
+
   # Managed apps POST uncaught exceptions here (per-app ingest token).
   namespace :api do
     resources :exceptions, only: [ :create ]

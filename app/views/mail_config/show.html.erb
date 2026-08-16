@@ -1,0 +1,43 @@
+<% content_for :title, "Rendered mail config" %>
+
+<div class="page-head">
+  <div>
+    <h1>Rendered mail config</h1>
+    <div class="page-head__meta">
+      <%= link_to "Mail", mail_path %> · what the tables above render to
+    </div>
+  </div>
+  <div class="head-actions"><%= button(text: "← Mail", href: mail_path, variant: :text) %></div>
+</div>
+
+<% if @error %>
+  <section class="card notice notice--error">
+    <h2>Nothing renders</h2>
+    <p>
+      Every row set is built and checked before any file is written, so one bad record fails all six
+      rather than producing five good files and a sixth that quietly omits a line.
+    </p>
+    <pre class="logbox"><%= @error %></pre>
+  </section>
+<% else %>
+  <section class="card notice">
+    <h2>Preview only</h2>
+    <p>
+      These files are not installed from here. Writing them means writing into
+      <span class="mono">/etc/postfix</span> and <span class="mono">/etc/dovecot</span> as root and
+      running <span class="mono">postmap</span>, and the agent has no mail verbs yet — so this page
+      renders and validates, and the install is still <span class="mono">deploy/switch-mail-to-ltvb.sh</span>.
+    </p>
+  </section>
+
+  <% @files.each do |name, body| %>
+    <% file = MailConfig.file(name) %>
+    <details class="card" <%= "open" if name == @files.keys.first %>>
+      <summary>
+        <span class="mono"><%= file[:path] %></span>
+        <span class="muted">· <%= body.lines.count %> lines<%= " · postmap" if file[:postmap] %></span>
+      </summary>
+      <pre class="logbox"><%= body %></pre>
+    </details>
+  <% end %>
+<% end %>

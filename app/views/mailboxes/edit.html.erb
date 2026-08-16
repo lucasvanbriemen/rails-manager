@@ -1,0 +1,19 @@
+<% content_for :title, "#{@mailbox.address}" %>
+
+<div class="page-head">
+  <div>
+    <h1 class="mono"><%= @mailbox.address %></h1>
+    <div class="page-head__meta">
+      <% if @mailbox.credentialed? %>
+        <%= badge("password set", tone: :ok) %>
+        <% if @mailbox.password_set_at %>· <%= time_ago_in_words(@mailbox.password_set_at) %><% end %>
+      <% else %>
+        <%= badge("no password", tone: :warn) %>
+      <% end %>
+      · <span class="mono"><%= @mailbox.maildir_path %></span>
+    </div>
+  </div>
+  <div class="head-actions"><%= button(text: "← Domain", href: mail_domain_path(@domain), variant: :text) %></div>
+</div>
+
+<%= render "form", mailbox: @mailbox, domain: @domain %>

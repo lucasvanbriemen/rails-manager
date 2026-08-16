@@ -1,0 +1,11 @@
+<% content_for :title, "New mailbox · #{@domain.name}" %>
+
+<div class="page-head">
+  <div>
+    <h1>New mailbox</h1>
+    <div class="page-head__meta">on <%= link_to @domain.name, mail_domain_path(@domain), class: "mono" %></div>
+  </div>
+  <div class="head-actions"><%= button(text: "← Domain", href: mail_domain_path(@domain), variant: :text) %></div>
+</div>
+
+<%= render "form", mailbox: @mailbox, domain: @domain %>

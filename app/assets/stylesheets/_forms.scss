@@ -77,6 +77,23 @@
   input.mono, .mono input { font-family: var(--mono); font-size: 0.85rem; }
 }
 
+// Rails wraps an invalid field in a <div class="field_with_errors">. Left as a
+// block it becomes the flex item in an .input-suffix row, and the input
+// collapses to its content width the moment the form re-renders with an error —
+// the layout shifting is how you'd notice, not the message. `contents` keeps
+// the wrapper out of the box tree entirely.
+.field_with_errors {
+  display: contents;
+
+  input, select, textarea {
+    border-color: var(--error);
+
+    &:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 25%, transparent); }
+  }
+
+  label { color: var(--error); }
+}
+
 .field__hint {
   margin: 0.4rem 0 0;
   font-size: 0.78rem;

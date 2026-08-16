@@ -49,11 +49,23 @@ details.card {
   }
 }
 
+// Full-width cards in a column — for content a two-up grid would squeeze, like
+// a table whose row actions need the room.
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+
+  .card { margin-bottom: 0; }
+}
+
 .cols {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(24rem, 1fr));
   gap: 1.25rem;
   align-items: start;
+  margin-bottom: 1.25rem;
 
   .card { margin-bottom: 0; }
 }

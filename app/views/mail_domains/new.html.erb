@@ -1,0 +1,11 @@
+<% content_for :title, "New mail domain" %>
+
+<div class="page-head">
+  <div>
+    <h1>New mail domain</h1>
+    <div class="page-head__meta">A domain this server knows something about, mail-wise.</div>
+  </div>
+  <div class="head-actions"><%= button(text: "← Mail", href: mail_path, variant: :text) %></div>
+</div>
+
+<%= render "form", domain: @domain %>

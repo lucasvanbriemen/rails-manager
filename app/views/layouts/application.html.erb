@@ -23,14 +23,31 @@
   </head>
 
   <body>
+    <% mail_section = request.path == "/mail" || request.path.start_with?("/mail/") %>
     <%= header(title: "Apps", items: [
-      {name: "Dashboard", href: root_path, active: !current_page?(new_app_path)},
+      {name: "Dashboard", href: root_path, active: !current_page?(new_app_path) && !mail_section},
+      {name: "Mail", href: mail_path, active: mail_section},
       ({name: "New app", href: new_app_path, active: current_page?(new_app_path)} if can?(:create, :apps))
     ].compact) %>
 
     <main class="container">
       <% if flash[:notice] %><div class="flash flash--notice"><%= flash[:notice] %></div><% end %>
       <% if flash[:alert] %><div class="flash flash--alert"><%= flash[:alert] %></div><% end %>
+
+      <%# A generated mailbox password exists exactly once, in this flash. There
+          is no reader for it on the record, so this render is the only chance
+          anyone gets to copy it. %>
+      <% if flash[:password] %>
+        <div class="secret">
+          <div class="secret__label">New password for <span class="mono"><%= flash[:password_for] %></span></div>
+          <code class="secret__value"><%= flash[:password] %></code>
+          <p class="secret__note">
+            Shown once. Nothing stored it — only a SHA512-CRYPT digest was kept, so if this is lost
+            the only recourse is another reset.
+          </p>
+        </div>
+      <% end %>
+
       <%= yield %>
     </main>
   </body>

@@ -1,0 +1,10 @@
+<% content_for :title, "Edit #{@domain.name}" %>
+
+<div class="page-head">
+  <div>
+    <h1>Edit <span class="mono"><%= @domain.name %></span></h1>
+  </div>
+  <div class="head-actions"><%= button(text: "← Domain", href: mail_domain_path(@domain), variant: :text) %></div>
+</div>
+
+<%= render "form", domain: @domain %>

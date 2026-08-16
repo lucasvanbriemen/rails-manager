@@ -1,0 +1,165 @@
+<% content_for :title, "#{@domain.name} · Mail" %>
+
+<div class="page-head">
+  <div>
+    <h1 class="mono"><%= @domain.name %></h1>
+    <div class="page-head__meta">
+      <%= link_to "Mail", mail_path %> ·
+      <% if @domain.accepts_mail? %>
+        <%= badge("accepts local delivery", tone: :ok) %>
+      <% else %>
+        <%= badge("relayed to its MX") %>
+      <% end %>
+      <% unless @domain.active? %><%= badge("inactive", tone: :warn) %><% end %>
+    </div>
+  </div>
+  <div class="head-actions">
+    <% if can?(:update, :apps) %>
+      <%= button(text: "Edit domain", href: edit_mail_domain_path(@domain), variant: :outline) %>
+    <% end %>
+    <%= button(text: "← Mail", href: mail_path, variant: :text) %>
+  </div>
+</div>
+
+<div class="cols">
+  <section class="card">
+    <h2>Settings</h2>
+    <dl class="kv">
+      <dt>Active</dt><dd><%= @domain.active? ? "yes" : "no" %></dd>
+      <dt>Local delivery</dt>
+      <dd>
+        <%= @domain.local_delivery? ? "on" : "off" %>
+        <div class="row-note">
+          <%= @domain.local_delivery? ?
+                "Listed in virtual_mailbox_domains — this server claims final delivery, so an unknown recipient is rejected rather than relayed." :
+                "Not listed — Postfix does an ordinary MX lookup and the mail goes wherever DNS says." %>
+        </div>
+      </dd>
+      <dt>Catch-all</dt>
+      <dd>
+        <% if @domain.forwards_catch_all? %>
+          forward → <span class="mono"><%= @domain.catch_all_target %></span>
+        <% else %>
+          reject
+        <% end %>
+      </dd>
+      <dt>DKIM</dt>
+      <dd>
+        <% if @domain.signs_dkim? %>
+          <span class="mono"><%= @domain.dkim_selector %></span>
+          <div class="row-note mono"><%= @domain.dkim_key_path %></div>
+        <% else %>
+          <span class="muted">does not sign</span>
+        <% end %>
+      </dd>
+      <% if @domain.notes.present? %>
+        <dt>Notes</dt><dd><%= simple_format @domain.notes %></dd>
+      <% end %>
+    </dl>
+
+    <% if can?(:delete, :apps) %>
+      <div class="card__actions">
+        <%= button(text: "Delete domain", href: mail_domain_path(@domain), method: :delete,
+                   variant: :outline, class: "is-danger",
+                   data: { turbo_confirm: "Delete #{@domain.name} with its #{pluralize(@mailboxes.size, "mailbox", plural: "mailboxes")} and #{pluralize(@aliases.size, "alias", plural: "aliases")}? The Maildirs on disk are NOT deleted." }) %>
+      </div>
+    <% end %>
+  </section>
+
+  <% if (gaps = @domain.configuration_gaps).any? %>
+    <section class="card notice">
+      <h2>Needs attention</h2>
+      <ul class="notice__list">
+        <% gaps.each do |gap| %>
+          <li><%= gap %></li>
+        <% end %>
+      </ul>
+    </section>
+  <% end %>
+</div>
+
+<div class="stack">
+  <section class="card">
+    <h2>
+      Mailboxes <span class="chip"><%= @mailboxes.size %></span>
+      <% if can?(:create, :apps) %>
+        <span class="card__head-action"><%= button(text: "Add mailbox", href: new_mail_domain_mailbox_path(@domain), variant: :outline) %></span>
+      <% end %>
+    </h2>
+
+    <% if @mailboxes.empty? %>
+      <p class="muted">No mailboxes on this domain.</p>
+    <% else %>
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr><th>Address</th><th>Auth</th><th>Quota</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% @mailboxes.each do |mailbox| %>
+              <tr>
+                <td>
+                  <span class="mono"><%= mailbox.local_part %></span><span class="muted mono">@<%= @domain.name %></span>
+                  <% unless mailbox.active? %><%= badge("inactive") %><% end %>
+                </td>
+                <td>
+                  <% if mailbox.credentialed? %>
+                    <%= badge("password set", tone: :ok, title: mailbox.password_set_at&.strftime("%Y-%m-%d %H:%M")) %>
+                  <% else %>
+                    <%= badge("no password", tone: :warn, title: "Omitted from the Dovecot passwd-file — nothing to authenticate against") %>
+                  <% end %>
+                </td>
+                <td class="mono"><%= mailbox.unlimited_quota? ? "unlimited" : bytes_human(mailbox.quota_bytes) %></td>
+                <td class="table__actions">
+                  <% if can?(:update, :apps) %>
+                    <%= button(text: "Edit", href: edit_mail_domain_mailbox_path(@domain, mailbox), variant: :text) %>
+                    <%= button(text: mailbox.credentialed? ? "Reset password" : "Generate password",
+                               href: reset_password_mail_domain_mailbox_path(@domain, mailbox), method: :post, variant: :text,
+                               data: { turbo_confirm: "Generate a new password for #{mailbox.address}? It is shown once and the old one stops working immediately." }) %>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+  </section>
+
+  <section class="card">
+    <h2>
+      Aliases <span class="chip"><%= @aliases.size %></span>
+      <% if can?(:create, :apps) %>
+        <span class="card__head-action"><%= button(text: "Add alias", href: new_mail_domain_mail_alias_path(@domain), variant: :outline) %></span>
+      <% end %>
+    </h2>
+
+    <% if @aliases.empty? %>
+      <p class="muted">No aliases on this domain.</p>
+    <% else %>
+      <div class="table-scroll">
+        <table class="table">
+          <thead>
+            <tr><th>Address</th><th>Forwards to</th><th></th></tr>
+          </thead>
+          <tbody>
+            <% @aliases.each do |mail_alias| %>
+              <tr>
+                <td>
+                  <span class="mono"><%= mail_alias.local_part %></span><span class="muted mono">@<%= @domain.name %></span>
+                  <% unless mail_alias.enabled? %><%= badge("disabled") %><% end %>
+                </td>
+                <td class="mono"><%= mail_alias.destination_preview %></td>
+                <td class="table__actions">
+                  <% if can?(:update, :apps) %>
+                    <%= button(text: "Edit", href: edit_mail_domain_mail_alias_path(@domain, mail_alias), variant: :text) %>
+                  <% end %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    <% end %>
+  </section>
+</div>

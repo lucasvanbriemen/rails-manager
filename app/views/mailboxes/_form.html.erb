@@ -1,0 +1,64 @@
+<%= form_with model: mailbox,
+              url: (mailbox.new_record? ? mail_domain_mailboxes_path(domain) : mail_domain_mailbox_path(domain, mailbox)),
+              html: { class: "form" } do |f| %>
+  <% if mailbox.errors.any? %>
+    <div class="flash flash--alert"><%= mailbox.errors.full_messages.to_sentence %></div>
+  <% end %>
+
+  <div class="field">
+    <%= f.label :local_part, "Address" %>
+    <div class="input-suffix">
+      <%= f.text_field :local_part, class: "mono", placeholder: "postmaster" %>
+      <span class="input-suffix__label mono">@<%= domain.name %></span>
+    </div>
+  </div>
+
+  <fieldset>
+    <legend>Quota</legend>
+    <p class="field__hint">Leave the amount blank for unlimited, which is what every mailbox is today.</p>
+    <div class="form-row">
+      <div class="field">
+        <%= label_tag "mailbox[quota_amount]", "Amount" %>
+        <%= number_field_tag "mailbox[quota_amount]", quota_amount(mailbox), step: "any", min: 0, placeholder: "unlimited" %>
+      </div>
+      <div class="field">
+        <%= label_tag "mailbox[quota_unit]", "Unit" %>
+        <%= select_tag "mailbox[quota_unit]", options_for_select(%w[MB GB], quota_unit(mailbox)) %>
+      </div>
+    </div>
+  </fieldset>
+
+  <div class="field--check">
+    <%= f.check_box :active %>
+    <%= f.label :active, "Active" %>
+  </div>
+  <p class="field__hint">
+    An inactive mailbox is left out of <code>vmailbox</code>, so Postfix rejects mail to it. The
+    Maildir already on disk stays where it is either way.
+  </p>
+
+  <div class="field">
+    <%= f.label :notes, "Notes" %>
+    <%= f.text_area :notes, rows: 3 %>
+  </div>
+
+  <% if mailbox.new_record? %>
+    <p class="field__hint">
+      New mailboxes are created without a credential: with no digest there is no line in the Dovecot
+      passwd-file at all, so nothing can authenticate until you generate a password from the domain
+      page. That is deliberate — the nine imported accounts shared one password and one of them was
+      used to relay ~12k phishing messages.
+    </p>
+  <% end %>
+
+  <div class="form-actions">
+    <%= button(text: mailbox.new_record? ? "Add mailbox" : "Save", type: :submit) %>
+    <%= button(text: "Cancel", href: mail_domain_path(domain), variant: :text) %>
+    <% if !mailbox.new_record? && can?(:delete, :apps) %>
+      <span class="form-actions__spacer"></span>
+      <%= button(text: "Delete", href: mail_domain_mailbox_path(domain, mailbox), method: :delete,
+                 variant: :outline, class: "is-danger",
+                 data: { turbo_confirm: "Delete #{mailbox.address}? Its Maildir on disk is NOT deleted." }) %>
+    <% end %>
+  </div>
+<% end %>

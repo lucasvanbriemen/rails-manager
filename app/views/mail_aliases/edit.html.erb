@@ -1,0 +1,13 @@
+<% content_for :title, "#{@mail_alias.source}" %>
+
+<div class="page-head">
+  <div>
+    <h1 class="mono"><%= @mail_alias.source %></h1>
+    <div class="page-head__meta">
+      forwards to <span class="mono"><%= @mail_alias.destination_preview %></span>
+    </div>
+  </div>
+  <div class="head-actions"><%= button(text: "← Domain", href: mail_domain_path(@domain), variant: :text) %></div>
+</div>
+
+<%= render "form", mail_alias: @mail_alias, domain: @domain %>
