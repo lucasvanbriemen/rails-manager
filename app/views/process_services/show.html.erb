@@ -1,0 +1,132 @@
+<% content_for :title, "#{@service.name} · Workers" %>
+
+<div class="page-head">
+  <div>
+    <h1 class="mono"><%= @service.name %></h1>
+    <div class="page-head__meta">
+      <%= link_to "Workers", process_services_path %> ·
+      <%= worker_status_badge(@status) %>
+      <% if @service.adopted? %><%= badge("adopted") %><% end %>
+      <% unless @service.enabled? %><%= badge("retired") %><% end %>
+      <% if @service.app %>· <%= link_to @service.app.name, @service.app, class: "mono" %><% end %>
+    </div>
+  </div>
+  <div class="head-actions">
+    <% if can?(:update, :apps) && @agent[:up] %>
+      <%= button(text: "Restart", href: restart_process_service_path(@service), method: :post,
+                 data: { turbo_confirm: "Restart #{@service.unit_name}?" }) %>
+      <%= button(text: "Start", href: start_process_service_path(@service), method: :post, variant: :outline) %>
+      <%= button(text: "Stop", href: stop_process_service_path(@service), method: :post, variant: :outline, class: "is-danger",
+                 data: { turbo_confirm: "Stop #{@service.unit_name}? Anything it is working on stops with it." }) %>
+    <% end %>
+    <% if can?(:update, :apps) %>
+      <%= button(text: "Edit", href: edit_process_service_path(@service), variant: :text) %>
+    <% end %>
+  </div>
+</div>
+
+<div class="cols">
+  <section class="card">
+    <h2>Definition</h2>
+    <dl class="kv">
+      <dt>Unit</dt><dd class="mono"><%= @service.unit_name %></dd>
+      <dt>Kind</dt><dd class="mono"><%= @service.kind %></dd>
+      <dt>Runs as</dt><dd class="mono"><%= @service.user %></dd>
+      <dt>Working dir</dt><dd class="mono break"><%= @service.working_directory %></dd>
+      <dt>Command</dt><dd class="mono break"><%= @service.command_preview %></dd>
+      <dt>Environment</dt>
+      <dd>
+        <% if @service.environment.blank? %>
+          <span class="muted">none</span>
+        <% else %>
+          <%# Keys only. A worker's environment is where the database URL and the
+              API keys live, and this page is not worth leaking them over. %>
+          <span class="mono"><%= @service.environment.keys.sort.join(", ") %></span>
+          <div class="row-note"><%= pluralize(@service.environment.size, "variable") %> — values are not shown</div>
+        <% end %>
+      </dd>
+      <dt>At boot</dt><dd><%= @service.autostart? ? "starts automatically" : "manual start only" %></dd>
+      <dt>Ownership</dt>
+      <dd>
+        <%= @service.managed? ? "managed here" : "adopted" %>
+        <div class="row-note">
+          <%= @service.managed? ?
+                "The manager may write and install #{@service.unit_name}." :
+                "Configured elsewhere (a hand-written unit or a supervisor program). The manager describes it and may control it, but must not overwrite its definition." %>
+        </div>
+      </dd>
+      <% if @service.notes.present? %>
+        <dt>Notes</dt><dd><%= simple_format @service.notes %></dd>
+      <% end %>
+    </dl>
+
+    <% if can?(:delete, :apps) %>
+      <div class="card__actions">
+        <%= button(text: "Forget this worker", href: process_service_path(@service), method: :delete,
+                   variant: :outline, class: "is-danger",
+                   data: { turbo_confirm: "Remove the record for #{@service.name}? Whatever is running under that name keeps running — stop it first if that is what you meant." }) %>
+      </div>
+    <% end %>
+  </section>
+
+  <section class="card">
+    <h2>Live state</h2>
+    <% if @status.nil? %>
+      <p class="muted">
+        <%= @agent[:up] ? "systemd had nothing to report for this unit." : "The agent is not answering, so there is no live state to show." %>
+      </p>
+    <% else %>
+      <% properties = @status["properties"] || {} %>
+      <dl class="kv">
+        <dt>Active</dt><dd class="mono"><%= properties["ActiveState"] %> / <%= properties["SubState"] %></dd>
+        <dt>Loaded</dt><dd class="mono"><%= properties["LoadState"] %><%= " · #{properties['UnitFileState']}" if properties["UnitFileState"].present? %></dd>
+        <dt>Main PID</dt><dd class="mono"><%= properties["MainPID"].to_i.positive? ? properties["MainPID"] : "—" %></dd>
+        <dt>Memory</dt><dd class="mono"><%= worker_memory(@status) || "—" %></dd>
+        <dt>Restarts</dt><dd class="mono"><%= worker_restarts(@status) || "—" %></dd>
+        <dt>Started</dt><dd><%= worker_uptime(@status) || "—" %></dd>
+        <% if properties["Result"].present? && properties["Result"] != "success" %>
+          <dt>Last result</dt><dd><%= badge(properties["Result"], tone: :danger) %></dd>
+        <% end %>
+      </dl>
+    <% end %>
+  </section>
+</div>
+
+<div class="stack">
+  <section class="card">
+    <h2>Journal</h2>
+    <% if @journal.nil? %>
+      <p class="muted">Needs the agent — <span class="mono">systemd.journal</span> is how these lines are read.</p>
+    <% else %>
+      <div class="viewer">
+        <div class="viewer__bar">
+          <form method="get" action="<%= process_service_path(@service) %>">
+            <select name="lines" onchange="this.form.requestSubmit()" aria-label="Journal lines">
+              <% [ 50, 200, 500, 2000 ].each do |n| %>
+                <option value="<%= n %>" <%= "selected" if n == @lines %>>last <%= n %> lines</option>
+              <% end %>
+            </select>
+          </form>
+          <span class="viewer__bar-note mono"><%= @service.unit_name %></span>
+        </div>
+        <pre class="logbox logbox--tall"><%= @journal %></pre>
+      </div>
+    <% end %>
+  </section>
+
+  <details class="card">
+    <summary>
+      Unit file the manager would write
+      <span class="muted">· <span class="mono"><%= @service.unit_path %></span></span>
+    </summary>
+    <p class="hint">
+      <% if @service.adopted? %>
+        This row is adopted, so nothing installs this — it is shown because it is the difference
+        between what the manager would write and whatever owns the process today.
+      <% end %>
+      Environment values are redacted here. The installed file is mode 0600 because those lines
+      carry whatever the worker needs to run, and a preview in a browser must not undo that.
+    </p>
+    <pre class="logbox"><%= @unit %></pre>
+  </details>
+</div>

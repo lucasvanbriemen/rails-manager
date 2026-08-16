@@ -13,6 +13,7 @@ class AppsController < ApplicationController
     @deliveries = @app.webhook_deliveries.limit(5)
     @open_exceptions = @app.exception_groups.open_status.recent.limit(5)
     @open_exception_count = @app.exception_groups.open_status.count
+    @process_services = @app.process_services.ordered
   end
 
   def new
@@ -54,25 +55,27 @@ class AppsController < ApplicationController
     end
   end
 
+  # Untracking now tears down: AppTeardown stops and forgets the app's workers
+  # and deletes its files, then the record goes. It refuses to delete anything
+  # it cannot prove belongs to this app alone — an apex site's directory is the
+  # webspace, and a shared checkout is every other app's too — and says so in
+  # the notice rather than failing silently.
   def destroy
     return forbidden if cannot?(:delete, :apps)
 
-    # A repo isn't a Plesk subdomain — just stop tracking it (checkout stays on disk).
-    # Neither is an apex domain: it IS the webspace, and `remove-subdomain` with a
-    # blank name would be asking Plesk to delete the whole subscription — every
-    # other app under it included. Removing a domain is a Plesk decision, not this
-    # tool's, so the record goes and the hosting stays.
-    if @app.repo? || @app.apex?
-      label = @app.repo? ? @app.name : @app.fqdn
-      @app.destroy
-      return redirect_to root_path, notice: "Stopped managing #{label} (hosting and files left in place)."
+    label = @app.repo? ? @app.name : @app.fqdn
+    steps = AppTeardown.call(@app)
+
+    # An apex domain IS the webspace: `remove-subdomain` with a blank name asks
+    # Plesk to delete the whole subscription, every other app under it included.
+    # Removing a domain is a Plesk decision, not this tool's.
+    unless @app.repo? || @app.apex?
+      result = Plesk.remove_subdomain(@app.subdomain, @app.domain)
+      steps << (result.ok ? "removed the Plesk subdomain" : "Plesk said: #{result.err}")
     end
 
-    result = Plesk.remove_subdomain(@app.subdomain, @app.domain)
-    fqdn = @app.fqdn
     @app.destroy
-    notice = result.ok ? "Removed #{fqdn} (subdomain + record)." : "Removed record; Plesk said: #{result.err}"
-    redirect_to root_path, notice: notice
+    redirect_to root_path, notice: "Stopped managing #{label}#{" — #{steps.join('; ')}" if steps.any?}."
   end
 
   # --- member deploy actions ---

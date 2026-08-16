@@ -62,6 +62,33 @@ module ApplicationHelper
     badge(status.to_s, tone: status.to_s == "open" ? :danger : :ok)
   end
 
+  # --- teardown ------------------------------------------------------------
+
+  # Untracking deletes things now, so the confirmation has to name them: the
+  # exact path, the workers by count, and — for the cases where the files are
+  # deliberately kept — why. A dialog that says "are you sure?" is a dialog
+  # nobody reads.
+  def teardown_warning(app, services = [])
+    lines = [ "Stop managing #{app.repo? ? app.name : app.fqdn}?", "" ]
+
+    lines << if app.apex?
+      "Its files are KEPT: #{app.app_path} is #{app.domain}'s own document root, not one app's directory."
+    else
+      "This DELETES #{app.app_path} and everything in it."
+    end
+
+    lines << "The Plesk subdomain is removed too." unless app.repo? || app.apex?
+
+    if services.any?
+      lines << "#{pluralize(services.size, 'worker')} (#{services.map(&:unit_name).join(', ')}) " \
+               "will be stopped, disabled and forgotten."
+    end
+
+    lines << ""
+    lines << "This cannot be undone."
+    lines.join("\n")
+  end
+
   # --- system vitals -------------------------------------------------------
 
   # Above this a resource is worth noticing; above CRITICAL it needs action.

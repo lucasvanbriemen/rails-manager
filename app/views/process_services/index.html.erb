@@ -1,0 +1,74 @@
+<% content_for :title, "Workers" %>
+
+<div class="page-head">
+  <div>
+    <h1>Workers</h1>
+    <div class="page-head__meta">
+      <%= pluralize(@services.size, "worker") %> ·
+      <%= @services.count(&:adopted?) %> adopted ·
+      <%= @services.count(&:managed?) %> managed here
+    </div>
+  </div>
+  <div class="head-actions">
+    <% if can?(:create, :apps) %>
+      <%= button(text: "Add worker", href: new_process_service_path) %>
+    <% end %>
+  </div>
+</div>
+
+<% unless @agent[:up] %>
+  <section class="card notice">
+    <h2>Live state unavailable</h2>
+    <p>
+      ltvb-agentd is not answering on <span class="mono"><%= Agent.socket_path %></span>, so these rows
+      are the manager's description of each worker rather than what systemd currently reports.
+      Starting and stopping needs the agent too.
+    </p>
+  </section>
+<% end %>
+
+<% if @services.empty? %>
+  <p class="empty">No workers described yet.</p>
+<% else %>
+  <section class="card">
+    <div class="table-scroll">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Worker</th>
+            <th>State</th>
+            <th>App</th>
+            <th>Kind</th>
+            <th>Memory</th>
+            <th>Started</th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @services.each do |service| %>
+            <% status = @statuses[service.id] %>
+            <tr>
+              <td>
+                <%= link_to service.name, service, class: "table__link mono" %>
+                <% if service.adopted? %>
+                  <%= badge("adopted", title: "Described here, but configured elsewhere — the manager must not write its unit file") %>
+                <% end %>
+                <% unless service.enabled? %><%= badge("retired") %><% end %>
+              </td>
+              <td><%= worker_status_badge(status) %></td>
+              <td>
+                <% if service.app %>
+                  <%= link_to service.app.name, service.app, class: "mono" %>
+                <% else %>
+                  <span class="muted">host-wide</span>
+                <% end %>
+              </td>
+              <td class="mono"><%= service.kind %></td>
+              <td class="mono"><%= worker_memory(status) || "—" %></td>
+              <td><%= worker_uptime(status) || "—" %></td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </section>
+<% end %>

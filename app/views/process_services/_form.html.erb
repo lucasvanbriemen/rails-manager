@@ -1,0 +1,101 @@
+<%= form_with model: service, url: (service.new_record? ? process_services_path : process_service_path(service)),
+              html: { class: "form" } do |f| %>
+  <% if service.errors.any? %>
+    <div class="flash flash--alert"><%= service.errors.full_messages.to_sentence %></div>
+  <% end %>
+
+  <div class="form-row">
+    <div class="field">
+      <%= f.label :name, "Name" %>
+      <%= f.text_field :name, class: "mono", placeholder: "music-solid-queue" %>
+      <p class="field__hint">
+        This is the systemd unit name: it becomes <span class="mono"><%= service.name.presence || "&lt;name&gt;".html_safe %>.service</span>.
+        Lowercase, no slashes — validated against the same pattern the renderer uses, so a name that
+        would not work as a unit is refused here rather than at install time.
+      </p>
+    </div>
+    <div class="field">
+      <%= f.label :kind, "Kind" %>
+      <%= f.select :kind, ProcessService::KINDS.map { |k| [ k, k ] }, include_blank: false %>
+    </div>
+  </div>
+
+  <div class="form-row">
+    <div class="field">
+      <%= f.label :app_id, "App" %>
+      <%= f.collection_select :app_id, App.order(:domain, :subdomain), :id, :name,
+                              include_blank: "— host-wide (no app) —" %>
+      <p class="field__hint">
+        Optional. A worker with no app is host-wide; one tied to an app is untied rather than
+        deleted if that app is ever untracked.
+      </p>
+    </div>
+    <div class="field">
+      <%= f.label :user, "Runs as" %>
+      <%= f.text_field :user, class: "mono", placeholder: "ltvb" %>
+    </div>
+  </div>
+
+  <div class="field">
+    <%= f.label :working_directory, "Working directory" %>
+    <%= f.text_field :working_directory, class: "mono", placeholder: "/var/www/vhosts/ltvb.nl/music.ltvb.nl" %>
+  </div>
+
+  <div class="field">
+    <%= label_tag "process_service[argv_text]", "Command" %>
+    <%= text_area_tag "process_service[argv_text]", service.argv_list.join("\n"), rows: 5, class: "mono",
+                      placeholder: "/var/www/vhosts/ltvb.nl/.rbenv/shims/bundle\nexec\nrails\nsolid_queue:start" %>
+    <p class="field__hint">
+      <strong>One argument per line</strong>, not a command line. supervisor's <code>command=</code> is a
+      string it splits itself, which puts every value one quoting bug away from being a second
+      command; an <code>ExecStart</code> built from a validated array has no shell in it to escape
+      from. An argument containing a space is fine — it is one line.
+      <strong>The first line must be an absolute path</strong>: systemd resolves the binary itself
+      rather than searching a <code>PATH</code> nobody here controls.
+    </p>
+  </div>
+
+  <div class="field">
+    <%= label_tag "process_service[environment_text]", "Environment" %>
+    <%= text_area_tag "process_service[environment_text]",
+                      service.environment.to_h.map { |k, v| "#{k}=#{v}" }.join("\n"),
+                      rows: 4, class: "mono", placeholder: "RAILS_ENV=production" %>
+    <p class="field__hint">
+      <code>KEY=value</code> per line; split on the first <code>=</code> only, so a value containing
+      one survives. Lines starting with <code>#</code> are ignored.
+    </p>
+  </div>
+
+  <div class="field--check">
+    <%= f.check_box :enabled %>
+    <%= f.label :enabled, "Enabled" %>
+  </div>
+  <p class="field__hint">Off retires a worker without losing its definition, its notes or which app it belonged to.</p>
+
+  <div class="field--check">
+    <%= f.check_box :autostart %>
+    <%= f.label :autostart, "Start automatically at boot" %>
+  </div>
+  <p class="field__hint">Renders the <code>[Install]</code> section. Off means it only runs when something starts it.</p>
+
+  <div class="field--check">
+    <%= f.check_box :managed %>
+    <%= f.label :managed, "The manager owns this unit file" %>
+  </div>
+  <p class="field__hint">
+    Leave this <strong>off</strong> for a worker that is already configured elsewhere — a hand-written
+    unit or a supervisor program. Adopted rows are described and can still be started and stopped;
+    what they must not do is have their definition overwritten while something else owns it.
+  </p>
+
+  <div class="field">
+    <%= f.label :notes, "Notes" %>
+    <%= f.text_area :notes, rows: 3 %>
+    <p class="field__hint">The first non-blank line becomes the unit's <code>Description=</code>.</p>
+  </div>
+
+  <div class="form-actions">
+    <%= button(text: service.new_record? ? "Add worker" : "Save", type: :submit) %>
+    <%= button(text: "Cancel", href: (service.new_record? ? process_services_path : process_service_path(service)), variant: :text) %>
+  </div>
+<% end %>

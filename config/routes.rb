@@ -21,6 +21,16 @@ Rails.application.routes.draw do
     end
   end
 
+  # Workers: the long-running processes beside the apps. Controlled through
+  # ltvb-agentd's systemd verbs, not the sudo wrapper.
+  resources :process_services, path: "workers" do
+    member do
+      post :start
+      post :stop
+      post :restart
+    end
+  end
+
   # Mail administration. Flat controller names rather than a `Mail::` namespace
   # on purpose: the mail gem (an ActionMailer dependency) already owns the
   # top-level `Mail` constant, and reopening it from an autoloaded controller is

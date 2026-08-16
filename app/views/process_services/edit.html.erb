@@ -1,0 +1,11 @@
+<% content_for :title, "Edit #{@service.name}" %>
+
+<div class="page-head">
+  <div>
+    <h1>Edit <span class="mono"><%= @service.name %></span></h1>
+    <div class="page-head__meta"><span class="mono"><%= @service.unit_name %></span></div>
+  </div>
+  <div class="head-actions"><%= button(text: "← Worker", href: process_service_path(@service), variant: :text) %></div>
+</div>
+
+<%= render "form", service: @service %>

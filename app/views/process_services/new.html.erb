@@ -1,0 +1,11 @@
+<% content_for :title, "New worker" %>
+
+<div class="page-head">
+  <div>
+    <h1>New worker</h1>
+    <div class="page-head__meta">A long-running process beside the apps.</div>
+  </div>
+  <div class="head-actions"><%= button(text: "← Workers", href: process_services_path, variant: :text) %></div>
+</div>
+
+<%= render "form", service: @service %>

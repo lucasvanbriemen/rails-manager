@@ -23,9 +23,11 @@
   </head>
 
   <body>
-    <% mail_section = request.path == "/mail" || request.path.start_with?("/mail/") %>
+    <% mail_section    = request.path == "/mail" || request.path.start_with?("/mail/") %>
+    <% workers_section = request.path.start_with?("/workers") %>
     <%= header(title: "Apps", items: [
-      {name: "Dashboard", href: root_path, active: !current_page?(new_app_path) && !mail_section},
+      {name: "Dashboard", href: root_path, active: !current_page?(new_app_path) && !mail_section && !workers_section},
+      {name: "Workers", href: process_services_path, active: workers_section},
       {name: "Mail", href: mail_path, active: mail_section},
       ({name: "New app", href: new_app_path, active: current_page?(new_app_path)} if can?(:create, :apps))
     ].compact) %>

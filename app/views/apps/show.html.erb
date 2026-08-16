@@ -47,7 +47,7 @@
       <% if can?(:delete, :apps) %>
         <div class="card__actions">
           <%= button(text: "Stop managing", href: app_path(@app), method: :delete, variant: :outline, class: "is-danger",
-                     data: { turbo_confirm: "Stop managing #{@app.name}? Only the record goes — the checkout at #{@app.deploy_path}, any workers and any scheduled jobs are left exactly as they are." }) %>
+                     data: { turbo_confirm: teardown_warning(@app, @process_services) }) %>
         </div>
       <% end %>
     <% else %>
@@ -71,10 +71,10 @@
         <div class="card__actions">
           <% if @app.apex? %>
             <%= button(text: "Stop managing", href: app_path(@app), method: :delete, variant: :outline, class: "is-danger",
-                       data: { turbo_confirm: "Stop managing #{@app.fqdn}? This is an apex domain, so only the record goes — the hosting, the files and any workers are left exactly as they are." }) %>
+                       data: { turbo_confirm: teardown_warning(@app, @process_services) }) %>
           <% else %>
             <%= button(text: "Delete app", href: app_path(@app), method: :delete, variant: :outline, class: "is-danger",
-                       data: { turbo_confirm: "Delete #{@app.fqdn}? This removes the Plesk subdomain and its files, plus this app's deployment and exception history. Workers and scheduled jobs are kept (they are only untied from this app)." }) %>
+                       data: { turbo_confirm: teardown_warning(@app, @process_services) }) %>
           <% end %>
         </div>
       <% end %>
@@ -148,6 +148,33 @@
       </ul>
     <% else %>
       <p class="muted card__list">No deliveries received yet.</p>
+    <% end %>
+  </section>
+
+  <section class="card">
+    <h2>
+      Workers <span class="chip"><%= @process_services.size %></span>
+      <% if can?(:create, :apps) %>
+        <span class="card__head-action">
+          <%= button(text: "Add worker", href: new_process_service_path(app_id: @app.id), variant: :outline) %>
+        </span>
+      <% end %>
+    </h2>
+    <% if @process_services.empty? %>
+      <p class="muted">No workers tied to this app.</p>
+    <% else %>
+      <ul class="rows">
+        <% @process_services.each do |service| %>
+          <li>
+            <%= link_to process_service_path(service) do %>
+              <strong class="mono"><%= service.name %></strong>
+              <span class="muted"><%= service.kind %></span>
+              <% if service.adopted? %><%= badge("adopted") %><% end %>
+              <% unless service.enabled? %><%= badge("retired") %><% end %>
+            <% end %>
+          </li>
+        <% end %>
+      </ul>
     <% end %>
   </section>
 

@@ -60,6 +60,13 @@
 
   // The two selects submit a GET form; contents keeps them in the toolbar row.
   form { display: contents; }
+
+  // Identifies what is being tailed, pushed to the far end of the bar.
+  &-note {
+    margin-left: auto;
+    font-size: 0.74rem;
+    color: var(--muted);
+  }
 }
 
 // "Follow" — a checkbox that reads as a toggle chip.
