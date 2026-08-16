@@ -47,7 +47,7 @@
       <% if can?(:delete, :apps) %>
         <div class="card__actions">
           <%= button(text: "Stop managing", href: app_path(@app), method: :delete, variant: :outline, class: "is-danger",
-                     data: { turbo_confirm: "Stop managing #{@app.name}? The on-disk checkout is left in place." }) %>
+                     data: { turbo_confirm: "Stop managing #{@app.name}? Only the record goes — the checkout at #{@app.deploy_path}, any workers and any scheduled jobs are left exactly as they are." }) %>
         </div>
       <% end %>
     <% else %>
@@ -60,10 +60,22 @@
         <dt>master.key</dt><dd><%= @app.master_key.present? ? "set" : "—" %></dd>
         <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
       </dl>
+      <%# Two very different outcomes behind one route, so the button has to say
+          which one it is. AppsController#destroy only calls Plesk for a real
+          subdomain: an apex domain IS the webspace, and `remove-subdomain` with
+          a blank name would ask Plesk to delete the whole subscription, so that
+          branch untracks and leaves the hosting alone. Labelling both "Delete
+          app" told an apex site it was about to lose a subdomain it doesn't
+          have. %>
       <% if can?(:delete, :apps) %>
         <div class="card__actions">
-          <%= button(text: "Delete app", href: app_path(@app), method: :delete, variant: :outline, class: "is-danger",
-                     data: { turbo_confirm: "Remove subdomain #{@app.fqdn} and stop managing it?" }) %>
+          <% if @app.apex? %>
+            <%= button(text: "Stop managing", href: app_path(@app), method: :delete, variant: :outline, class: "is-danger",
+                       data: { turbo_confirm: "Stop managing #{@app.fqdn}? This is an apex domain, so only the record goes — the hosting, the files and any workers are left exactly as they are." }) %>
+          <% else %>
+            <%= button(text: "Delete app", href: app_path(@app), method: :delete, variant: :outline, class: "is-danger",
+                       data: { turbo_confirm: "Delete #{@app.fqdn}? This removes the Plesk subdomain and its files, plus this app's deployment and exception history. Workers and scheduled jobs are kept (they are only untied from this app)." }) %>
+          <% end %>
         </div>
       <% end %>
     <% end %>
