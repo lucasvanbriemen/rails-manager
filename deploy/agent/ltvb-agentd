@@ -1113,7 +1113,15 @@ module LtvbAgent
   # Exec — child processes with a deadline and no shell, ever.
   # ---------------------------------------------------------------------------
   module Exec
-    MAX_OUTPUT = 256 * 1024
+    # How much of a child's output is captured. Raised from 256 KiB because a
+    # journal or log read is a legitimate multi-MB response, and truncating here
+    # is invisible to the caller — it looks like a short log, not a clipped one.
+    #
+    # This is buffered in the ROOT daemon's memory, one buffer per in-flight
+    # call, so it is a deliberate ceiling rather than "unlimited": a runaway
+    # command stops at 100 MiB instead of consuming the box. Kept in step with
+    # Agent::MAX_RESPONSE_BYTES on the client.
+    MAX_OUTPUT = 100 * 1024 * 1024
     TERM_GRACE = 5
 
     # Children get nothing from the agent's environment. LANG is pinned so

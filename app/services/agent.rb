@@ -37,9 +37,13 @@ module Agent
   # Refusing here first turns a truncated, confusing failure into a clear one.
   MAX_REQUEST_BYTES = 512 * 1024
 
-  # Ceiling on a single response line. sites.discover over 22 hosts is a few
-  # tens of KB; anything approaching this is a bug on the other side.
-  MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+  # Ceiling on a single response line. Discovery verbs return tens of KB, but a
+  # log or journal read legitimately returns far more, and the old 8 MiB cap
+  # turned a large-but-valid read into "response exceeds 8388608 bytes".
+  #
+  # Must stay >= the agent's own Exec::MAX_OUTPUT, or the daemon truncates
+  # before this is ever reached and raising it here changes nothing.
+  MAX_RESPONSE_BYTES = 100 * 1024 * 1024
 
   # Long enough for `plesk bin subdomain --create`, which really does take
   # minutes on this box. The agent enforces its own per-verb deadline and kills
