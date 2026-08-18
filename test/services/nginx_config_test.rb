@@ -500,6 +500,30 @@ class NginxConfigTest < ActiveSupport::TestCase
     assert_includes shared, "ssl_session_cache   shared:ltvb_tls:10m;"
   end
 
+  # Regression: the temp paths were absent, so nginx used the ones compiled into
+  # the Debian binary (/var/lib/nginx/*) — Plesk's tree, whose parent is 0700
+  # nginx:nginx while our workers run as www-data. Any request body too large to
+  # buffer in memory got a 500 that never reached the app, so there was no Rails
+  # log line and no exception to find: 298 GitHub webhook deliveries were lost
+  # before anyone noticed a missing notification.
+  #
+  # Every spool path must be declared and must live under our own tree, so that
+  # removing Plesk cannot take the directory with it.
+  test "the shared http config spools to a tree the worker user owns" do
+    shared = NginxConfig.shared_http_config
+
+    %w[client_body proxy fastcgi scgi uwsgi].each do |kind|
+      assert_match(/^#{kind}_temp_path\s+\S+;?/, shared,
+                   "#{kind}_temp_path is not declared, so nginx falls back to the compiled-in default")
+    end
+
+    shared.lines.grep(/_temp_path/).each do |line|
+      path = line.split[1]
+      assert path.start_with?("/var/lib/ltvb-nginx/"),
+             "#{line.strip} spools outside our own tree"
+    end
+  end
+
   test "the scrub pattern redacts auth_token wherever it appears in the query" do
     # Two passes, because that is what the two chained maps do.
     scrub = ->(uri) { apply_scrub(apply_scrub(uri)) }

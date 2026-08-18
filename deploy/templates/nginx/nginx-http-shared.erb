@@ -48,3 +48,26 @@ ssl_session_timeout 1d;
 # Tickets without rotation are worse than no tickets — the key lives for the
 # lifetime of the process and breaks forward secrecy for every session it signed.
 ssl_session_tickets off;
+
+# Spool directories for request/response bodies too large to hold in memory.
+#
+# These MUST be declared. Without them nginx falls back to the paths compiled
+# into the Debian binary (/var/lib/nginx/*), which belong to Plesk's nginx: the
+# parent /var/lib/nginx is 0700 nginx:nginx, and our workers run as www-data.
+# The subdirectories are themselves www-data-owned, so ownership looks correct
+# and the failure is purely a traversal denial on the parent — which is why it
+# reads as a mystery 500 rather than an obvious permissions mistake.
+#
+# The effect is silent and partial, which is what makes it dangerous: a body
+# under client_body_buffer_size never touches disk and succeeds, so small
+# requests are fine and only large ones fail. Large POSTs (webhook payloads,
+# uploads) got a 500 that never reached the app — no Rails log line, no
+# exception, nothing but "$status 500" with an empty $upstream_response_time.
+#
+# Pointing at our own tree also means Plesk's removal cannot take the spool
+# directory with it.
+client_body_temp_path /var/lib/ltvb-nginx/body;
+proxy_temp_path       /var/lib/ltvb-nginx/proxy 1 2;
+fastcgi_temp_path     /var/lib/ltvb-nginx/fastcgi 1 2;
+scgi_temp_path        /var/lib/ltvb-nginx/scgi 1 2;
+uwsgi_temp_path       /var/lib/ltvb-nginx/uwsgi 1 2;
