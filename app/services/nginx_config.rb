@@ -64,7 +64,14 @@ class NginxConfig
   SOCKET_NAME     = "puma.sock".freeze
   # Plesk's per-domain php-fpm pools; kept as-is so the pool files do not have
   # to move in the same change that moves the web server.
-  FPM_SOCKET_ROOT = "/var/www/vhosts/system".freeze
+  # php-fpm sockets live in our own namespace. This was Plesk's
+  # /var/www/vhosts/system/<fqdn>/php-fpm.sock, which no pool has listened on
+  # since the FPM pools moved to /run/php: rendering it produced a vhost whose
+  # fastcgi_pass pointed at a socket that does not exist, and every PHP site
+  # rendered from this class answered 502. Must match ltvb-agentd's
+  # FPM_RUN_ROOT/FPM_PREFIX, which is what writes the pool the socket comes from.
+  FPM_SOCKET_ROOT = "/run/php".freeze
+  FPM_SOCKET_PREFIX = "ltvb-".freeze
   # One shared webroot for http-01 challenges, so renewal does not depend on any
   # individual site's document root existing or being readable.
   #
@@ -321,7 +328,7 @@ class NginxConfig
   # Derived from the already-validated fqdn rather than stored, so there is no
   # field an operator could point at another app's socket.
   def app_socket  = "#{SOCKET_ROOT}/#{fqdn}/#{SOCKET_NAME}"
-  def fpm_socket  = "#{FPM_SOCKET_ROOT}/#{fqdn}/php-fpm.sock"
+  def fpm_socket  = "#{FPM_SOCKET_ROOT}/#{FPM_SOCKET_PREFIX}#{fqdn}.sock"
   def cert_dir    = "#{CERT_ROOT}/#{fqdn}"
   def log_dir     = "#{LOG_ROOT}/#{fqdn}"
 

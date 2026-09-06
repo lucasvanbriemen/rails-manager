@@ -450,14 +450,93 @@ class DeployRunner
 
   # ---- recipe phases -------------------------------------------------------
 
+  # Provisioning without Plesk: an nginx server block, a certificate and (for a
+  # Rails app) a systemd unit, all written root-side by the agent from a render
+  # spec. This replaces `plesk bin subdomain --create` + `--update-php` +
+  # `ext ruby --enable` + `repair web`, none of which exist once Plesk is gone.
+  #
+  # TLS is a chicken-and-egg on a hostname that has never been served: the vhost
+  # names certificate files under /etc/letsencrypt/live/<fqdn>, `nginx -t` fails
+  # on files that are not there, and the agent refuses a config that fails its
+  # validator. So the site goes up in plaintext, which is enough to answer the
+  # ACME http-01 challenge over the shared webroot, and is rewritten with TLS
+  # once the lineage exists. Both writes are the same render spec bar one flag.
   def provision!
-    log "\n--- provision Plesk subdomain ---\n"
-    plesk "create subdomain", Plesk.create_subdomain(@app.subdomain, @app.domain)
-    plesk "set document root to #{@app.relative_www_root}",
-          Plesk.set_docroot(@app.subdomain, @app.domain, @app.relative_www_root)
-    plesk "enable Passenger/Ruby #{@app.ruby_version}",
-          Plesk.enable_ruby(@app.fqdn, @app.ruby_version)
-    plesk "reconfigure apache vhost", Plesk.reconfigure(@app.fqdn)
+    unless @app.vhost_kind?
+      log "\n--- #{@app.app_kind} apps get no vhost; nothing to provision ---\n"
+      return
+    end
+
+    log "\n--- provision #{@app.fqdn} ---\n"
+
+    # nginx refuses to START when a directory named in access_log is missing, so
+    # this is a precondition of the first site write, not a tidy-up after it.
+    agent! "create the site log directory", "dir.ensure", fqdn: @app.fqdn, kind: "logs"
+
+    agent! "write the nginx site (plaintext, for the ACME challenge)",
+           "nginx.site.write", **nginx_site_params(tls: false)
+    agent! "reload nginx", "nginx.reload"
+
+    agent! "issue the certificate", "certbot.issue", fqdn: @app.fqdn
+
+    agent! "write the nginx site (TLS)", "nginx.site.write", **nginx_site_params(tls: true)
+    agent! "reload nginx", "nginx.reload"
+
+    install_app_unit! if @app.app_kind == "rails"
+  end
+
+  # The narrow render spec the agent accepts: a kind from a closed enum, a
+  # document-root suffix and a handful of flags. Never a line of nginx config —
+  # root renders it from its own template, keyed by `kind`.
+  def nginx_site_params(tls:)
+    {
+      fqdn:           @app.fqdn,
+      kind:           @app.app_kind.to_s,
+      suffix:         @app.doc_root_suffix.to_s,
+      tls:            tls,
+      # Nothing may claim HSTS before it has a certificate: a max-age served
+      # over the plaintext pass would pin the browser to https for a host that
+      # cannot yet answer it.
+      hsts:           tls && @app.hsts.present?,
+      redirect_http:  @app.redirect_http != false,
+      default_server: @app.default_server.present?,
+      php:            @app.php_version.presence || "8.3",
+      allow:          @app.ip_allowlist.to_s.split
+    }.tap do |p|
+      p[:cable_path] = @app.cable_path if @app.cable_path.present?
+      p[:cable_port] = @app.cable_port if @app.cable_port.present?
+      p[:xaccel]     = @app.xaccel_path if @app.xaccel_path.present?
+    end
+  end
+
+  # Installed but deliberately NOT started: the checkout is still empty at this
+  # point in a "create", so Puma would fail to boot and the unit would go into
+  # a restart loop. deploy! ends in restart!, which starts it on real code.
+  def install_app_unit!
+    unit = "#{SystemdUnit.app_unit_name(@app)}.service"
+    ruby_bin = SystemdUnit.ruby_bin_dir!(SystemdUnit::RBENV_ROOT, @app.ruby_version)
+
+    agent! "install #{unit}", "systemd.unit.install",
+           fqdn:        @app.fqdn,
+           description: "Puma for #{@app.fqdn}",
+           ruby:        @app.ruby_version,
+           env:         SystemdUnit.app_environment(@app, ruby_bin)
+
+    agent! "enable #{unit} at boot", "systemd.enable", unit: unit, now: false
+  end
+
+  # A provisioning step that must succeed. The agent already validated the
+  # parameters; what can still fail is the machine (a cert that will not issue,
+  # a config the validator rejects), and a half-provisioned host is worse than
+  # a failed deploy someone can read the log of.
+  def agent!(label, verb, **params)
+    res = Agent.call(verb, **params)
+    unless res.ok
+      raise StepFailed, "#{label} failed (#{verb}): #{res.err.presence || res.out.presence || 'the agent refused'}"
+    end
+
+    log "#{label}: ok\n"
+    res
   end
 
   # Today's deploy, unchanged: every step runs in the directory the web server is
@@ -590,17 +669,62 @@ class DeployRunner
     run! %w[bundle exec rails assets:precompile], chdir: @app.app_path
   end
 
+  # Restarting is what makes a deploy take effect, so a failure here fails the
+  # deploy rather than being logged and stepped over.
+  #
+  # This used to touch tmp/restart.txt and nothing else. That was correct under
+  # Passenger, which watches the file — but every Rails app here has run under
+  # Puma in an `ltvb-app@<fqdn>.service` unit since the move off Plesk, and
+  # nothing watches that file any more. Deploys reported success while the
+  # running process kept serving the previous release, until something
+  # unrelated restarted the unit. The file is still touched for any app that
+  # has no unit of its own, which is the only case where it can still mean
+  # something.
   def restart!
-    log "\n--- restart Passenger ---\n"
-    tmp = File.join(@app.app_path, "tmp")
-    FileUtils.mkdir_p(tmp)
-    FileUtils.touch(File.join(tmp, "restart.txt"))
-    log "touched tmp/restart.txt\n"
+    case @app.app_kind
+    when "rails"  then restart_app_unit!
+    when "laravel", "php" then reload_fpm!
+    else
+      log "\n--- no app server to restart (#{@app.app_kind}) ---\n"
+    end
   end
 
+  def restart_app_unit!
+    unit = "#{SystemdUnit.app_unit_name(@app)}.service"
+    log "\n--- restart #{unit} ---\n"
+    res = Agent.call("systemd.restart", unit: unit, action: "restart", block: true)
+    raise StepFailed, "could not restart #{unit}: #{res.err.presence || res.out.presence || 'agent call failed'}" unless res.ok
+
+    log "restarted #{unit}\n"
+  end
+
+  # PHP has no long-lived per-app process to bounce, but opcache holds the old
+  # bytecode for up to revalidate_freq seconds, so a deploy is not visible until
+  # the pool is reloaded. Reload, not restart: it finishes in-flight requests.
+  def reload_fpm!
+    php = @app.php_version.presence || "8.3"
+    log "\n--- reload php#{php}-fpm (#{@app.fqdn}) ---\n"
+    res = Agent.call("fpm.reload", php: php)
+    raise StepFailed, "could not reload php#{php}-fpm: #{res.err.presence || 'agent call failed'}" unless res.ok
+
+    log "reloaded php#{php}-fpm\n"
+  end
+
+  # The mirror of provision!, and deliberately forgiving: a teardown that stops
+  # at the first missing piece leaves the rest of the host half-served. Each
+  # step reports and the next one still runs. The certificate is left alone —
+  # certbot lineages are cheap to keep and re-issuing one is rate-limited.
   def destroy!
-    log "\n--- remove Plesk subdomain ---\n"
-    plesk "remove subdomain", Plesk.remove_subdomain(@app.subdomain, @app.domain)
+    log "\n--- tear down #{@app.fqdn} ---\n"
+
+    if @app.app_kind == "rails"
+      unit = "#{SystemdUnit.app_unit_name(@app)}.service"
+      res = Agent.call("systemd.unit.remove", unit: unit)
+      log(res.ok ? "removed #{unit}\n" : "WARN: could not remove #{unit}: #{res.err.presence || 'the agent refused'}\n")
+    end
+
+    res = Agent.call("nginx.site.remove", fqdn: @app.fqdn)
+    log(res.ok ? "removed the nginx site\n" : "WARN: could not remove the nginx site: #{res.err.presence || 'the agent refused'}\n")
   end
 
   def verify!

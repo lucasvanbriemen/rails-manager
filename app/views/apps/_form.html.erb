@@ -9,7 +9,7 @@
   <% end %>
 
   <div class="form-kind">
-    <span>Type: <strong><%= app.repo? ? "Repo (git pull + commands)" : "Rails app (Plesk subdomain)" %></strong></span>
+    <span>Type: <strong><%= app.repo? ? "Repo (git pull + commands)" : "Served app (nginx vhost)" %></strong></span>
     <span class="form-kind__spacer"></span>
     <%= button(text: "Switch to #{app.repo? ? "Rails app" : "Repo"}",
                href: new_app_path(app_kind: app.repo? ? "app" : "repo"), variant: :outline) %>

@@ -66,12 +66,24 @@ class AppsController < ApplicationController
     label = @app.repo? ? @app.name : @app.fqdn
     steps = AppTeardown.call(@app)
 
-    # An apex domain IS the webspace: `remove-subdomain` with a blank name asks
-    # Plesk to delete the whole subscription, every other app under it included.
-    # Removing a domain is a Plesk decision, not this tool's.
+    # Stop serving it. An apex row is still exempt, for the same reason it is
+    # exempt from the file delete: its directory and its vhost are the webspace
+    # itself, and taking those away removes the domain rather than one app.
+    #
+    # This used to ask Plesk to remove the subdomain, which also unlinked the
+    # vhost and the document root. Post-Plesk both are ours: the server block
+    # under /etc/ltvb/nginx/sites and, for a Rails app, the unit that Puma runs
+    # in. Neither disappears on its own, and a left-behind server block points
+    # at a socket that no longer exists — a 502 on a hostname nobody owns.
     unless @app.repo? || @app.apex?
-      result = Plesk.remove_subdomain(@app.subdomain, @app.domain)
-      steps << (result.ok ? "removed the Plesk subdomain" : "Plesk said: #{result.err}")
+      if @app.app_kind == "rails"
+        unit = "#{SystemdUnit.app_unit_name(@app)}.service"
+        removed = Agent.call("systemd.unit.remove", unit: unit)
+        steps << (removed.ok ? "removed #{unit}" : "could not remove #{unit}: #{removed.err.presence || 'the agent refused'}")
+      end
+
+      site = Agent.call("nginx.site.remove", fqdn: @app.fqdn)
+      steps << (site.ok ? "removed the nginx site" : "could not remove the nginx site: #{site.err.presence || 'the agent refused'}")
     end
 
     @app.destroy

@@ -43,7 +43,7 @@ module AppStatusChecker
   def classify(res)
     code = res.code.to_i
 
-    return { status: :placeholder, code: code, detail: "Plesk default page — Passenger not serving the app" } if placeholder?(res)
+    return { status: :placeholder, code: code, detail: "default placeholder page — nginx is not reaching the app" } if placeholder?(res)
 
     case code
     when 300..399

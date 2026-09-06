@@ -5,7 +5,7 @@
   <div>
     <h1><%= title %></h1>
     <div class="page-head__meta">
-      <%= @app.repo? ? "Pulled to a path and built with follow-up commands." : "Served as a Plesk subdomain behind nginx." %>
+      <%= @app.repo? ? "Pulled to a path and built with follow-up commands." : "Served by nginx, with its own certificate and systemd unit." %>
     </div>
   </div>
 </div>

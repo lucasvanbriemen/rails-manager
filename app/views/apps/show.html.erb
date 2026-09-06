@@ -61,12 +61,12 @@
         <dt>.env</dt><dd><%= @app.env_text.present? ? "#{@app.env_text.lines.count} lines" : "—" %></dd>
       </dl>
       <%# Two very different outcomes behind one route, so the button has to say
-          which one it is. AppsController#destroy only calls Plesk for a real
-          subdomain: an apex domain IS the webspace, and `remove-subdomain` with
-          a blank name would ask Plesk to delete the whole subscription, so that
-          branch untracks and leaves the hosting alone. Labelling both "Delete
-          app" told an apex site it was about to lose a subdomain it doesn't
-          have. %>
+          which one it is. AppsController#destroy only tears down the hosting for
+          a real subdomain: an apex domain's directory and vhost ARE the
+          webspace, so removing them would take the domain down rather than one
+          app, and that branch untracks and leaves the hosting alone. Labelling
+          both "Delete app" told an apex site it was about to lose a subdomain it
+          doesn't have. %>
       <% if can?(:delete, :apps) %>
         <div class="card__actions">
           <% if @app.apex? %>

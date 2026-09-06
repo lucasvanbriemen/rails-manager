@@ -77,7 +77,7 @@ module ApplicationHelper
       "This DELETES #{app.app_path} and everything in it."
     end
 
-    lines << "The Plesk subdomain is removed too." unless app.repo? || app.apex?
+    lines << "Its nginx site and app unit are removed too." unless app.repo? || app.apex?
 
     if services.any?
       lines << "#{pluralize(services.size, 'worker')} (#{services.map(&:unit_name).join(', ')}) " \

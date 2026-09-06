@@ -66,9 +66,14 @@ module SystemdUnit
   SOCKET_ROOT = "/run/ltvb-app".freeze
   SOCKET_NAME = "puma.sock".freeze
 
-  # Primary group of all six webspace users (psacln, gid 1003). The three units
-  # this replaces already set it, so nothing about file ownership changes.
-  DEFAULT_GROUP = "psacln".freeze
+  # Primary group of all six webspace users: gid 1003, named ltvb-web.
+  #
+  # It was called psacln while Plesk owned the box. The name went away with
+  # Plesk on 2026-09-04; the gid did not, so file ownership is unchanged and
+  # www-data is still a member (which is what lets nginx reach the Puma socket).
+  # Only the name in a unit file had to move, and until it did systemd could not
+  # resolve the group and every start died with status=216/GROUP.
+  DEFAULT_GROUP = "ltvb-web".freeze
 
   # A Rails app that leaks memory gets OOM-killed and restarted instead of
   # taking the other 21 hostnames down with it.

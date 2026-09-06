@@ -98,9 +98,9 @@ module LtvbAgent
   SITE_LOG_ROOT = "/var/log/ltvb/sites".freeze
   SITE_LOG_GROUP = "ltvb-log".freeze
   # Primary group of all six webspace owners (gid 1003) — what a unit runs as.
-  SITE_GROUP    = "psacln".freeze
+  SITE_GROUP    = "ltvb-web".freeze
   # The group the web server is in (gid 1002). Only it may open an fpm socket.
-  WEB_GROUP     = "psaserv".freeze
+  WEB_GROUP     = "ltvb-srv".freeze
 
   # Apache's XSendFile took a filesystem path in the response header; nginx's
   # X-Accel-Redirect takes a URI, and this is the URI namespace an app sends
@@ -115,6 +115,12 @@ module LtvbAgent
   # Debian's php-fpm layout: /etc/php/<version>/fpm/pool.d/<fqdn>.conf, one
   # master unit per version. The pools themselves are already per-domain.
   PHP_ROOT      = "/etc/php".freeze
+  # php-fpm sockets and pool files live in our own namespace, not Plesk's
+  # /var/www/vhosts/system/<fqdn>/php-fpm.sock. The prefix keeps our pools
+  # distinguishable from the distro's www.conf in the same pool.d directory,
+  # and /run/php is tmpfs, so a stale socket cannot outlive a reboot.
+  FPM_RUN_ROOT  = "/run/php".freeze
+  FPM_PREFIX    = "ltvb-".freeze
   PHP_VERSIONS  = %w[8.2 8.3 8.4].freeze
 
   # One shared webroot for http-01, so renewal never depends on an individual
@@ -1468,50 +1474,13 @@ module LtvbAgent
         summary: "protocol handshake", mutating: false, timeout: 5, params: {}
       },
 
-      # --- the seven verbs inherited from ltvb-deployer -------------------------
-      # Plesk still owns hosting until the licence expires, so these keep their
-      # exact behaviour; only the way they are called changed. sites.discover is
-      # their post-Plesk replacement and already works alongside them.
-      "plesk.domains" => {
-        summary: "list domains and their document roots", mutating: false, timeout: 30, params: {}
-      },
-      "plesk.subdomain.create" => {
-        summary: "create a subdomain (idempotent)", mutating: true, timeout: 300,
-        params: {
-          subdomain: { type: :label,  required: true },
-          domain:    { type: :domain, required: true }
-        }
-      },
-      "plesk.subdomain.docroot" => {
-        summary: "point a subdomain's document root at <fqdn>/<suffix>", mutating: true, timeout: 120,
-        params: {
-          subdomain: { type: :label,   required: true },
-          domain:    { type: :domain,  required: true },
-          # NOT the full www-root. The client sends the suffix ("public") and
-          # the agent composes "<sub>.<domain>/public" — so the directory a
-          # document root can point at is fixed by the hostname, not by the
-          # caller. Empty means the site root.
-          suffix:    { type: :relpath, default: "" }
-        }
-      },
-      "plesk.ruby.enable" => {
-        summary: "enable Passenger/Ruby for a host and pin the version", mutating: true, timeout: 300,
-        params: {
-          fqdn:    { type: :fqdn,    required: true },
-          version: { type: :version, required: true }
-        }
-      },
-      "plesk.reconfigure" => {
-        summary: "regenerate a host's Apache vhost", mutating: true, timeout: 300,
-        params: { fqdn: { type: :fqdn, required: true } }
-      },
-      "plesk.subdomain.remove" => {
-        summary: "remove a subdomain", mutating: true, timeout: 300,
-        params: {
-          subdomain: { type: :label,  required: true },
-          domain:    { type: :domain, required: true }
-        }
-      },
+      # The six `plesk.*` verbs that used to live here are gone with Plesk itself
+      # (removed 2026-09-06). They shelled out to /usr/sbin/plesk and
+      # /usr/local/psa/admin/sbin/httpdmng, neither of which is installed any
+      # more, so keeping them would have turned "provision a site" from an
+      # unknown_verb the client can report into an exec failure halfway through.
+      # sites.discover replaced plesk.domains; nginx.site.write,
+      # systemd.unit.install, dir.ensure and certbot.issue replaced the rest.
       "jobs.restart" => {
         summary: "queue a restart of the manager's Solid Queue worker", mutating: true, timeout: 30, params: {}
       },
@@ -1665,6 +1634,28 @@ module LtvbAgent
           fqdn: { type: :fqdn, required: true },
           kind: { type: :enum, values: %w[logs releases shared], default: "logs" }
         }
+      },
+
+      # --- certificates ---------------------------------------------------------
+      # Provisioning a new host is otherwise a chicken-and-egg: nginx.site.write
+      # with tls renders ssl_certificate paths under /etc/letsencrypt/live/<fqdn>,
+      # `nginx -t` fails on a certificate that is not there yet, and the staged
+      # write is refused. So a new site is written without tls, the challenge is
+      # answered over the shared ACME webroot, and the site is rewritten with it.
+      #
+      # No path, webroot or certificate name is a parameter: all three are derived
+      # from the fqdn, exactly as everywhere else. --cert-name pins the lineage to
+      # the hostname so a re-issue updates that lineage instead of accumulating
+      # "-0001" directories that the vhost does not point at.
+      "certbot.issue" => {
+        summary: "issue or renew a host's certificate over the ACME webroot",
+        mutating: true, timeout: 300,
+        params: {
+          fqdn: { type: :fqdn, required: true },
+          # Let's Encrypt rate-limits real issuance hard (5 duplicate certs a
+          # week). Staging exists so provisioning can be rehearsed end to end.
+          staging: { type: :bool, default: false }
+        }
       }
     }.freeze
 
@@ -1786,7 +1777,7 @@ module LtvbAgent
   # already been through the schema, so they contain no validation.
   # ---------------------------------------------------------------------------
   class Handlers
-    PLESK          = "/usr/sbin/plesk".freeze
+    CERTBOT        = "/usr/bin/certbot".freeze
     SYSTEMCTL      = "/usr/bin/systemctl".freeze
     SUPERVISORCTL  = "/usr/bin/supervisorctl".freeze
     JOURNALCTL     = "/usr/bin/journalctl".freeze
@@ -1842,58 +1833,6 @@ module LtvbAgent
 
     def verb_ping(_params, _timeout)
       { data: { "agent_version" => VERSION, "protocol" => PROTOCOL, "verbs" => Schema.verbs } }
-    end
-
-    def verb_plesk_domains(_params, timeout)
-      res = plesk!([ PLESK, "db", "-Ne",
-                    "SELECT d.name, COALESCE(h.www_root,'') FROM domains d " \
-                    "LEFT JOIN hosting h ON h.dom_id = d.id ORDER BY d.name;" ], timeout)
-      sites = res.out.each_line.filter_map do |line|
-        fqdn, www_root = line.chomp.split("\t", 2)
-        next if fqdn.to_s.strip.empty?
-
-        { "fqdn" => fqdn.strip, "www_root" => www_root.to_s.strip }
-      end
-      { out: res.out, data: { "domains" => sites } }
-    end
-
-    def verb_plesk_subdomain_create(params, timeout)
-      fqdn = "#{params[:subdomain]}.#{params[:domain]}"
-      info = Exec.run([ PLESK, "bin", "subdomain", "--info", params[:subdomain], "-domain", params[:domain] ], timeout: timeout)
-      return { out: "subdomain #{fqdn} already exists\n" } if info.ok
-
-      res = plesk!([ PLESK, "bin", "subdomain", "--create", params[:subdomain], "-domain", params[:domain] ], timeout)
-      { out: res.out, err: res.err }
-    end
-
-    def verb_plesk_subdomain_docroot(params, timeout)
-      fqdn = "#{params[:subdomain]}.#{params[:domain]}"
-      # The www-root is composed here, from a hostname the schema proved and a
-      # suffix that cannot contain a dot or a slash-dot. The client never gets to
-      # name a directory.
-      www_root = params[:suffix].to_s.empty? ? fqdn : "#{fqdn}/#{params[:suffix]}"
-      res = plesk!([ PLESK, "bin", "subdomain", "--update", params[:subdomain],
-                    "-domain", params[:domain], "-www-root", www_root ], timeout)
-      { out: res.out, err: res.err, data: { "www_root" => www_root } }
-    end
-
-    def verb_plesk_ruby_enable(params, timeout)
-      # Two calls, not one: --enable turns Passenger on, --set-version pins it.
-      # A subdomain created without both gets no Passenger block at all and
-      # Apache serves the directory listing or 403s — the git.ltvb.nl trap.
-      enable = plesk!([ PLESK, "ext", "ruby", "--enable", "-domain", params[:fqdn], "-version", params[:version] ], timeout)
-      pin    = plesk!([ PLESK, "ext", "ruby", "--set-version", "-domain", params[:fqdn], "-version", params[:version] ], timeout)
-      { out: [ enable.out, pin.out ].join, err: [ enable.err, pin.err ].join }
-    end
-
-    def verb_plesk_reconfigure(params, timeout)
-      res = plesk!([ "/usr/local/psa/admin/sbin/httpdmng", "--reconfigure-domain", params[:fqdn] ], timeout)
-      { out: res.out, err: res.err }
-    end
-
-    def verb_plesk_subdomain_remove(params, timeout)
-      res = plesk!([ PLESK, "bin", "subdomain", "--remove", params[:subdomain], "-domain", params[:domain] ], timeout)
-      { out: res.out, err: res.err }
     end
 
     def verb_jobs_restart(_params, timeout)
@@ -2101,15 +2040,32 @@ module LtvbAgent
         data: { "path" => path, "created" => created } }
     end
 
-    # --- helpers ---------------------------------------------------------------
+    # --- certificates ----------------------------------------------------------
 
-    def plesk!(argv, timeout)
+    def verb_certbot_issue(params, timeout)
+      site = @webspaces.resolve(params[:fqdn])
+      live = File.join(LETSENCRYPT, site.fqdn)
+
+      argv = [ CERTBOT, "certonly", "--webroot", "--webroot-path", ACME_WEBROOT,
+               "--cert-name", site.fqdn, "-d", site.fqdn,
+               # Unattended: this runs from a deploy job with no terminal.
+               "--non-interactive", "--agree-tos",
+               # A deploy that re-runs must not burn a rate-limit slot on a
+               # certificate that is still good.
+               "--keep-until-expiring" ]
+      argv << "--staging" if params[:staging]
+
       res = Exec.run(argv, timeout: timeout)
-      raise Failure.new("#{File.basename(argv.first)} timed out after #{timeout}s", "timeout") if res.timed_out
+      raise Failure.new("certbot timed out after #{timeout}s", "timeout") if res.timed_out
       raise Failure.new(res.err.empty? ? res.out : res.err, "exec") unless res.ok
 
-      res
+      # certbot exits 0 for "nothing to do" as well as for a fresh issue, so the
+      # answer the caller actually needs is whether the lineage is on disk now.
+      { out: res.out, err: res.err,
+        data: { "fqdn" => site.fqdn, "live" => live, "present" => File.directory?(live) } }
     end
+
+    # --- helpers ---------------------------------------------------------------
 
     def subdomain_dirs(domain)
       suffix = ".#{domain}"
@@ -2167,9 +2123,9 @@ module LtvbAgent
     def render_template(name, **vars) = Templates.render(name, vars)
 
     def site_conf_path(fqdn) = File.join(NGINX_SITES, "#{fqdn}.conf")
-    def fpm_socket(fqdn)     = File.join(PLESK_SYSTEM, fqdn, "php-fpm.sock")
+    def fpm_socket(fqdn)     = File.join(FPM_RUN_ROOT, "#{FPM_PREFIX}#{fqdn}.sock")
     def app_socket(fqdn)     = File.join(APP_RUN_ROOT, fqdn, APP_SOCKET)
-    def pool_path(version, fqdn) = File.join(PHP_ROOT, version, "fpm", "pool.d", "#{fqdn}.conf")
+    def pool_path(version, fqdn) = File.join(PHP_ROOT, version, "fpm", "pool.d", "#{FPM_PREFIX}#{fqdn}.conf")
     def fpm_unit(version)    = "php#{version}-fpm.service"
     def fpm_bin(version)     = "/usr/sbin/php-fpm#{version}"
     def fpm_conf(version)    = File.join(PHP_ROOT, version, "fpm", "php-fpm.conf")
