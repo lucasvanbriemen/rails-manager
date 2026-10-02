@@ -28,7 +28,7 @@ on **2026-09-06**: there is no control panel any more, and no licence.
 3. **Secrets**: write `config/master.key` and `.env` (stored encrypted here).
 4. **Gems**: `bundle install` under the app's rbenv Ruby (`/opt/rbenv`) — the
    system Ruby lacks headers and native gems fail against it.
-5. **Databases**: create/migrate the secondary SQLite DBs (cache/queue/cable).
+5. **Databases**: `db:prepare` against the app's MariaDB database (the manager itself uses the `apps` database on the shared server, holding its own tables plus Solid Cache/Queue/Cable).
    A shared or external primary is never auto-migrated; that is a separate button.
 6. **Assets**: `SECRET_KEY_BASE_DUMMY=1 rails assets:precompile`.
 7. **Restart**: `systemd.restart` on the app's unit (Rails), or `fpm.reload`

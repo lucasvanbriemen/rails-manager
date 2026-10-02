@@ -44,15 +44,15 @@ class ConsoleSession < ApplicationRecord
   def append_output(chunk)
     return if chunk.blank?
 
-    self.class.where(id: id).update_all([ "output = output || ?", chunk ])
+    self.class.where(id: id).update_all([ "output = CONCAT(output, ?)", chunk ])
   end
 
-  # Keep only the tail of the transcript. SQLite substr/length are
-  # character-based on TEXT, so this never splits a multibyte char.
+  # Keep only the tail of the transcript. CHAR_LENGTH/SUBSTRING count
+  # characters, not bytes, so this never splits a multibyte char.
   def trim_output!
     self.class.where(id: id)
-        .where("length(output) > ?", MAX_OUTPUT)
-        .update_all([ "output = substr(output, length(output) - ? + 1)", MAX_OUTPUT ])
+        .where("CHAR_LENGTH(output) > ?", MAX_OUTPUT)
+        .update_all([ "output = SUBSTRING(output, CHAR_LENGTH(output) - ? + 1)", MAX_OUTPUT ])
   end
 
   # Mailbox of one, compare-and-set: the command only lands if the session is

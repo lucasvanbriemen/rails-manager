@@ -8,6 +8,12 @@
 #   2. VERIFICATION STATE — what "last verified" means on the dashboard, and the
 #      refusal to let a run that was never verified look like one that was.
 class Backup < ApplicationRecord
+  # MariaDB has no JSON column type: it is LONGTEXT plus a json_valid CHECK, so
+  # the schema says text and Active Record would hand back raw strings. Pin the
+  # type here so the column keeps decoding to a Ruby Array.
+  attribute :manifest, :json, default: -> { [] }
+  attribute :excluded, :json, default: -> { [] }
+
   RUNNING   = "running".freeze    # directory exists, phases still running
   SUCCEEDED = "succeeded".freeze  # every phase completed
   PARTIAL   = "partial".freeze    # something was unreadable; the rest is here

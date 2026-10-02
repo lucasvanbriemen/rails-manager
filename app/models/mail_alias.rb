@@ -21,6 +21,11 @@
 # from the mailbox table for any domain that forwards, so they are derived
 # rather than stored — a row in this table is only ever a real redirection.
 class MailAlias < ApplicationRecord
+  # MariaDB has no JSON column type: it is LONGTEXT plus a json_valid CHECK, so
+  # the schema says text and Active Record would hand back raw strings. Pin the
+  # type here so the column keeps decoding to a Ruby Array.
+  attribute :destinations, :json, default: -> { [] }
+
   belongs_to :mail_domain
 
   normalizes :local_part, with: ->(v) { v.to_s.strip.downcase.presence }

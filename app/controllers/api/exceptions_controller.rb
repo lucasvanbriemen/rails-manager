@@ -50,7 +50,7 @@ module Api
       Time.current
     end
 
-    # An error loop in one app must not flood the manager's SQLite. Excess
+    # An error loop in one app must not flood the manager's database. Excess
     # reports are dropped; the group's counts just undercount during a storm.
     def rate_limited?(app)
       key = "exception-ingest:#{app.id}:#{Time.current.strftime('%Y%m%d%H%M')}"

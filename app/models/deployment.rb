@@ -25,7 +25,7 @@ class Deployment < ApplicationRecord
   def append_log(chunk)
     return if chunk.blank?
 
-    self.class.where(id: id).update_all([ "log = log || ?", chunk ])
+    self.class.where(id: id).update_all([ "log = CONCAT(log, ?)", chunk ])
   end
 
   def duration

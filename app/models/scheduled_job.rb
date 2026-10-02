@@ -25,6 +25,12 @@ require "shellwords"
 # invisible again. #promotion_blockers is where that difference becomes
 # actionable.
 class ScheduledJob < ApplicationRecord
+  # MariaDB has no JSON column type: it is LONGTEXT plus a json_valid CHECK, so
+  # the schema says text and Active Record would hand back raw strings. Pin the
+  # type here so the column keeps decoding to a Ruby Array/Hash.
+  attribute :argv, :json, default: -> { [] }
+  attribute :environment, :json, default: -> { {} }
+
   # cron's own shorthands. @reboot is in the list because cron accepts it, not
   # because anything here uses it — a row that lied about the schedule would be
   # worse than no row.

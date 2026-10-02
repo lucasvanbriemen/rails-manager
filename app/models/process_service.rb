@@ -18,6 +18,12 @@ require "shellwords"
 # way — describing the seven workers is safe, rewriting them mid-migration is
 # not.
 class ProcessService < ApplicationRecord
+  # MariaDB has no JSON column type: it is LONGTEXT plus a json_valid CHECK, so
+  # the schema says text and Active Record would hand back raw strings. Pin the
+  # type here so the column keeps decoding to a Ruby Array/Hash.
+  attribute :argv, :json, default: -> { [] }
+  attribute :environment, :json, default: -> { {} }
+
   # solid_queue  — `bundle exec rails solid_queue:start` / `bin/jobs`
   # cable        — a standalone Puma serving only /cable
   # laravel_queue— `php artisan queue:work`
